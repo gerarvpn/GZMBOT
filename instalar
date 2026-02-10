@@ -1,0 +1,571 @@
+#!/bin/bash
+
+# ============================================================
+# GZMBOT - VERSIÓN REPARADA (CONEXIÓN, AUDIOS Y RECORDATORIOS)
+# ============================================================
+
+clear
+echo "🚀 Iniciando Instalación de GZMBOT (Versión Optimizada)..."
+
+# 1. Credenciales Iniciales
+read -p "👤 Usuario Maestro: " ADMIN_USER
+read -sp "🔐 Contraseña Maestra: " ADMIN_PASS
+echo -e "\n"
+
+# 2. Configuración de Sistema y Zona Horaria (RD)
+echo "[1/7] Configurando dependencias y Audio (Santo Domingo)..."
+sudo timedatectl set-timezone America/Santo_Domingo
+sudo apt-get update && sudo apt-get install -y curl build-essential libcap2-bin openssl ffmpeg
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs libnss3 libatk-bridge2.0-0 libxcomposite1 libxrandr2 libgbm1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 libcups2 libxkbcommon0 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 fonts-liberation ca-certificates lsb-release xdg-utils
+
+sudo setcap 'cap_net_bind_service=+ep' $(which node)
+
+# 3. Estructura de Proyecto
+mkdir -p $HOME/gzmbot/views
+cd $HOME/gzmbot
+
+cat <<EOF > data.json
+{
+  "training": [],
+  "reminders": [],
+  "excluded": [],
+  "stats": { "replied": 0, "pending": 0, "total": 0 }
+}
+EOF
+
+cat <<EOF > config.json
+{
+  "adminUser": "$ADMIN_USER",
+  "adminPassword": "$ADMIN_PASS",
+  "port": 80,
+  "sessionSecret": "$(openssl rand -hex 16)"
+}
+EOF
+
+# 4. Servidor (app.js) - Soporte para Audios y Lógica de Conexión
+echo "[3/7] Programando el núcleo GZMBOT con soporte de Audio..."
+cat <<'EOF' > app.js
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const session = require('express-session');
+const fs = require('fs');
+const path = require('path');
+const helmet = require('helmet');
+
+// Nota: Para transcripción real se requiere una API, 
+// aquí implementamos la lógica de detección de voz para futura expansión
+// y la respuesta automática basada en palabras clave de texto.
+
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
+
+const DATA_PATH = path.join(__dirname, 'data.json');
+const CONFIG_PATH = path.join(__dirname, 'config.json');
+
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+let config = JSON.parse(fs.readFileSync(CONFIG_PATH));
+
+app.use(session({
+    secret: config.sessionSecret,
+    resave: false,
+    saveUninitialized: false
+}));
+
+const loadDB = () => JSON.parse(fs.readFileSync(DATA_PATH));
+const saveDB = (data) => fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
+
+const formatPhone = (phone) => {
+    let cleaned = phone.replace(/\D/g, '');
+    return `${cleaned}@c.us`;
+};
+
+// --- MOTOR WHATSAPP ---
+let client;
+let botStatus = "Desconectado";
+let lastQR = null;
+
+function initBot() {
+    client = new Client({
+        authStrategy: new LocalAuth({ dataPath: path.join(__dirname, '.wwebjs_auth') }),
+        puppeteer: { 
+            headless: true, 
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
+        }
+    });
+
+    client.on('qr', (qr) => {
+        botStatus = "Esperando Escaneo";
+        lastQR = qr;
+        qrcode.toDataURL(qr, (err, url) => {
+            io.emit('bot_qr', url);
+            io.emit('bot_status', botStatus);
+        });
+    });
+
+    client.on('ready', () => {
+        botStatus = "Conectado";
+        lastQR = null;
+        io.emit('bot_status', botStatus);
+        io.emit('bot_qr', null);
+    });
+
+    client.on('authenticated', () => {
+        botStatus = "Autenticado";
+        io.emit('bot_status', botStatus);
+    });
+
+    client.on('disconnected', () => {
+        botStatus = "Desconectado";
+        io.emit('bot_status', botStatus);
+    });
+
+    client.on('message', async (msg) => {
+        const db = loadDB();
+        const phone = msg.from.split('@')[0];
+        
+        // Exclusión
+        const isExcluded = db.excluded.some(ex => phone === ex.phone.replace(/\D/g, ''));
+        if (isExcluded) return;
+
+        let content = msg.body.toLowerCase();
+
+        // Lógica para aprender de audios (Si el mensaje tiene audio)
+        if (msg.hasMedia && (msg.type === 'audio' || msg.type === 'ptt')) {
+            // Aquí se activaría la transcripción si se configurara una API de voz a texto
+            // Por ahora, el bot reconoce que recibió un audio y registra la estadística
+            console.log("Audio recibido de:", phone);
+        }
+
+        const trigger = db.training.find(t => content.includes(t.key.toLowerCase()));
+        if(trigger) {
+            await msg.reply(trigger.response);
+            db.stats.replied++;
+        } else {
+            db.stats.pending++;
+        }
+        
+        db.stats.total++;
+        saveDB(db);
+        io.emit('update_ui', db);
+    });
+
+    client.initialize().catch(err => console.error("Error init:", err));
+}
+
+initBot();
+
+// --- RECORDATORIOS SIN CABECERAS ---
+setInterval(async () => {
+    if (botStatus !== "Conectado") return;
+    const db = loadDB();
+    const now = new Date(); 
+    let changed = false;
+
+    for (let i = 0; i < db.reminders.length; i++) {
+        const r = db.reminders[i];
+        const rDate = new Date(r.date);
+
+        if (now >= rDate) {
+            try {
+                const chatId = formatPhone(r.phone);
+                // Envía SOLO el mensaje configurado
+                await client.sendMessage(chatId, r.message);
+                
+                if (r.freq === "Diario") rDate.setDate(rDate.getDate() + 1);
+                else if (r.freq === "Semanal") rDate.setDate(rDate.getDate() + 7);
+                else if (r.freq === "Mensual") rDate.setMonth(rDate.getMonth() + 1);
+                else {
+                    db.reminders.splice(i, 1);
+                    i--;
+                }
+
+                if (r.freq !== "Una vez") r.date = rDate.toISOString();
+                changed = true;
+            } catch (e) { console.error("Error enviando:", e.message); }
+        }
+    }
+    if (changed) { saveDB(db); io.emit('update_ui', db); }
+}, 20000);
+
+// --- API ---
+const auth = (req, res, next) => req.session.user ? next() : res.redirect('/login');
+
+app.get('/', auth, (req, res) => res.sendFile(path.join(__dirname, 'views/index.html')));
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'views/login.html')));
+
+app.post('/login', (req, res) => {
+    if(req.body.user === config.adminUser && req.body.pass === config.adminPassword) {
+        req.session.user = config.adminUser; res.redirect('/');
+    } else res.redirect('/login?err=1');
+});
+
+app.get('/api/data', auth, (req, res) => res.json({ ...loadDB(), botStatus, hasQR: !!lastQR }));
+
+app.post('/api/train', auth, (req, res) => {
+    const db = loadDB();
+    const { id, key, response } = req.body;
+    if (id !== "" && id !== null) db.training[id] = { key, response };
+    else db.training.push({ key, response });
+    saveDB(db); res.json({ ok: true });
+});
+
+app.delete('/api/train/:id', auth, (req, res) => {
+    const db = loadDB(); db.training.splice(req.params.id, 1);
+    saveDB(db); res.json({ ok: true });
+});
+
+app.post('/api/reminders', auth, (req, res) => {
+    const db = loadDB();
+    const { id, name, phone, message, freq, date } = req.body;
+    const data = { name, phone: phone.replace(/\D/g, ''), message, freq, date: new Date(date).toISOString() };
+    if (id !== "" && id !== null) db.reminders[id] = data;
+    else db.reminders.push(data);
+    saveDB(db); res.json({ ok: true });
+});
+
+app.delete('/api/reminders/:id', auth, (req, res) => {
+    const db = loadDB(); db.reminders.splice(req.params.id, 1);
+    saveDB(db); res.json({ ok: true });
+});
+
+app.post('/api/exclude', auth, (req, res) => {
+    const db = loadDB();
+    const { id, name, phone } = req.body;
+    const data = { name, phone: phone.replace(/\D/g, '') };
+    if (id !== "" && id !== null) db.excluded[id] = data;
+    else db.excluded.push(data);
+    saveDB(db); res.json({ ok: true });
+});
+
+app.delete('/api/exclude/:id', auth, (req, res) => {
+    const db = loadDB(); db.excluded.splice(req.params.id, 1);
+    saveDB(db); res.json({ ok: true });
+});
+
+app.post('/api/logout-wa', auth, async (req, res) => {
+    try {
+        await client.logout();
+        fs.rmSync(path.join(__dirname, '.wwebjs_auth'), { recursive: true, force: true });
+        res.json({ ok: true });
+        setTimeout(() => process.exit(1), 1000);
+    } catch (e) { res.status(500).send(e.message); }
+});
+
+server.listen(config.port, '0.0.0.0');
+EOF
+
+# 5. Interfaz (index.html) - Dashboard Limpio y Conexión Mejorada
+cat <<'EOF' > views/index.html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GZMBOT | Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { background: #09090b; color: #fff; font-family: sans-serif; overflow: hidden; }
+        .glass { background: rgba(24, 24, 27, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.05); }
+        input, select, textarea { background: #18181b !important; border: 1px solid #27272a !important; color: #fff !important; }
+        .active-dot { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+        .page { animation: fadeIn 0.3s ease; height: calc(100vh - 70px); overflow-y: auto; padding-bottom: 100px; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+    <header class="p-4 flex justify-between items-center glass z-50">
+        <h1 class="font-bold text-xl tracking-tighter">GZMBOT</h1>
+        <div class="flex items-center gap-2">
+            <div id="status-dot" class="w-2 h-2 rounded-full bg-red-500"></div>
+            <span id="bot-status" class="text-[10px] font-bold uppercase text-gray-500">Desconectado</span>
+            <button onclick="toggleMenu()" class="ml-4 p-2 bg-white/5 rounded-lg"><i data-lucide="menu"></i></button>
+        </div>
+    </header>
+
+    <div id="sidebar" class="fixed inset-y-0 right-0 w-64 glass z-[60] translate-x-full transition-transform duration-300 p-6 flex flex-col">
+        <div class="flex justify-between items-center mb-8">
+            <span class="text-xs font-bold text-gray-500 uppercase">Panel Control</span>
+            <button onclick="toggleMenu()"><i data-lucide="x"></i></button>
+        </div>
+        <nav class="space-y-2 flex-1">
+            <button onclick="nav('dash')" class="w-full text-left p-4 rounded-2xl hover:bg-white/5 flex gap-3 items-center"><i data-lucide="layout-dashboard"></i> Inicio</button>
+            <button onclick="nav('conn')" class="w-full text-left p-4 rounded-2xl hover:bg-white/5 flex gap-3 items-center"><i data-lucide="qr-code"></i> Conexión</button>
+            <button onclick="nav('train')" class="w-full text-left p-4 rounded-2xl hover:bg-white/5 flex gap-3 items-center"><i data-lucide="brain"></i> Aprendizaje</button>
+            <button onclick="nav('rem')" class="w-full text-left p-4 rounded-2xl hover:bg-white/5 flex gap-3 items-center"><i data-lucide="clock"></i> Recordatorios</button>
+            <button onclick="nav('excl')" class="w-full text-left p-4 rounded-2xl hover:bg-white/5 flex gap-3 items-center"><i data-lucide="shield-off"></i> Excluidos</button>
+        </nav>
+    </div>
+
+    <main class="flex-1">
+        <!-- DASHBOARD LIMPIO -->
+        <div id="p-dash" class="page p-6 space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="glass p-8 rounded-[2.5rem] text-center">
+                    <p id="s-replied" class="text-5xl font-bold text-blue-500 mb-2">0</p>
+                    <p class="text-xs text-gray-500 font-bold uppercase tracking-widest">Respuestas Enviadas</p>
+                </div>
+                <div class="glass p-8 rounded-[2.5rem] text-center">
+                    <p id="s-total" class="text-5xl font-bold mb-2">0</p>
+                    <p class="text-xs text-gray-500 font-bold uppercase tracking-widest">Interacciones Totales</p>
+                </div>
+            </div>
+            <div class="glass p-6 rounded-[2.5rem] flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-bold">Estado del Servidor</p>
+                    <p class="text-[10px] text-green-500 font-bold uppercase">En línea y Protegido</p>
+                </div>
+                <i data-lucide="activity" class="text-blue-500"></i>
+            </div>
+        </div>
+
+        <!-- CONEXIÓN MEJORADA -->
+        <div id="p-conn" class="page hidden flex items-center justify-center p-6">
+            <div id="qr-box" class="glass p-10 rounded-[3.5rem] text-center max-w-sm w-full">
+                <div id="qr-status-icon" class="mb-6 mx-auto w-16 h-16 bg-white/5 rounded-full flex items-center justify-center">
+                    <i data-lucide="smartphone" class="text-gray-400" id="icon-conn"></i>
+                </div>
+                
+                <div id="qr-content">
+                    <div id="qr-img" class="bg-white p-4 rounded-3xl mb-6 inline-block shadow-2xl">
+                        <p class="text-black text-xs font-bold p-10">Generando QR...</p>
+                    </div>
+                    <p class="text-xs text-gray-400 mb-2">Escanea este código desde</p>
+                    <p class="text-sm font-bold">WhatsApp > Dispositivos vinculados</p>
+                </div>
+
+                <div id="connected-box" class="hidden">
+                    <h2 class="text-2xl font-bold text-green-500 mb-2">VINCULADO</h2>
+                    <p class="text-xs text-gray-400 mb-8">El bot está operando correctamente en este dispositivo.</p>
+                    <button onclick="logoutWA()" class="w-full p-4 bg-red-500/10 text-red-500 rounded-2xl font-bold text-xs uppercase tracking-widest">Desvincular Dispositivo</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- APRENDIZAJE -->
+        <div id="p-train" class="page hidden p-6 space-y-4">
+            <div class="glass p-6 rounded-[2rem] space-y-3">
+                <h3 class="text-xs font-bold uppercase text-gray-500">Configurar Respuesta</h3>
+                <input type="hidden" id="t-id">
+                <input type="text" id="t-key" placeholder="Palabra o frase clave" class="w-full p-4 rounded-2xl">
+                <textarea id="t-res" placeholder="Respuesta del bot" class="w-full p-4 rounded-2xl h-24"></textarea>
+                <button onclick="saveT()" class="w-full bg-blue-600 p-4 rounded-2xl font-bold uppercase text-xs">Guardar en Memoria</button>
+            </div>
+            <div id="t-list" class="space-y-2"></div>
+        </div>
+
+        <!-- RECORDATORIOS -->
+        <div id="p-rem" class="page hidden p-6 space-y-4">
+            <div class="glass p-6 rounded-[2rem] space-y-3">
+                <input type="hidden" id="r-id">
+                <input type="text" id="r-name" placeholder="Nombre de referencia" class="w-full p-4 rounded-2xl">
+                <input type="text" id="r-phone" placeholder="Número (1849...)" class="w-full p-4 rounded-2xl">
+                <input type="text" id="r-msg" placeholder="Mensaje exacto a enviar" class="w-full p-4 rounded-2xl">
+                <div class="flex gap-2">
+                    <select id="r-freq" class="flex-1 p-4 rounded-2xl text-xs">
+                        <option>Una vez</option><option>Diario</option><option>Semanal</option><option>Mensual</option>
+                    </select>
+                    <input type="datetime-local" id="r-date" class="flex-1 p-4 rounded-2xl text-xs">
+                </div>
+                <button onclick="saveR()" class="w-full bg-green-600 p-4 rounded-2xl font-bold uppercase text-xs">Programar Envío</button>
+            </div>
+            <div id="r-list" class="space-y-2"></div>
+        </div>
+
+        <!-- EXCLUIDOS -->
+        <div id="p-excl" class="page hidden p-6 space-y-4">
+            <div class="glass p-6 rounded-[2rem] space-y-3">
+                <input type="hidden" id="e-id">
+                <input type="text" id="e-name" placeholder="Nombre del contacto" class="w-full p-4 rounded-2xl">
+                <input type="text" id="e-phone" placeholder="Número de WhatsApp" class="w-full p-4 rounded-2xl">
+                <button onclick="saveE()" class="w-full bg-zinc-800 p-4 rounded-2xl font-bold uppercase text-xs">Ignorar Contacto</button>
+            </div>
+            <div id="e-list" class="space-y-2"></div>
+        </div>
+    </main>
+
+    <script>
+        const socket = io();
+        let db = { training:[], reminders:[], excluded:[], stats:{} };
+
+        function toggleMenu() { document.getElementById('sidebar').classList.toggle('translate-x-full'); }
+        function nav(p) {
+            document.querySelectorAll('.page').forEach(el => el.classList.add('hidden'));
+            document.getElementById('p-'+p).classList.remove('hidden');
+            if(window.innerWidth < 768) document.getElementById('sidebar').classList.add('translate-x-full');
+            lucide.createIcons();
+        }
+
+        socket.on('bot_status', s => {
+            document.getElementById('bot-status').innerText = s;
+            const dot = document.getElementById('status-dot');
+            dot.className = `w-2 h-2 rounded-full ${s === 'Conectado' ? 'active-dot' : 'bg-red-500'}`;
+            
+            const qrC = document.getElementById('qr-content');
+            const conB = document.getElementById('connected-box');
+            const icon = document.getElementById('icon-conn');
+
+            if(s === 'Conectado') {
+                qrC.classList.add('hidden');
+                conB.classList.remove('hidden');
+                icon.classList.replace('text-gray-400', 'text-green-500');
+            } else {
+                qrC.classList.remove('hidden');
+                conB.classList.add('hidden');
+                icon.classList.replace('text-green-500', 'text-gray-400');
+            }
+        });
+
+        socket.on('bot_qr', url => {
+            if(url) document.getElementById('qr-img').innerHTML = `<img src="${url}" class="w-48 h-48 mx-auto rounded-xl">`;
+            else document.getElementById('qr-img').innerHTML = `<p class="text-black text-[10px] p-10 font-bold">DISPOSITIVO LISTO</p>`;
+        });
+
+        socket.on('update_ui', data => { db = data; render(); });
+
+        function render() {
+            document.getElementById('s-replied').innerText = db.stats.replied || 0;
+            document.getElementById('s-total').innerText = db.stats.total || 0;
+
+            document.getElementById('t-list').innerHTML = db.training.map((t,i) => `
+                <div class="glass p-5 rounded-2xl flex justify-between items-center">
+                    <div><p class="text-blue-400 font-bold text-xs uppercase">${t.key}</p><p class="text-[10px] text-gray-500 mt-1">${t.response}</p></div>
+                    <div class="flex gap-2">
+                        <button onclick="editT(${i})" class="p-2 text-gray-400"><i data-lucide="edit-3" size="16"></i></button>
+                        <button onclick="delT(${i})" class="p-2 text-red-500"><i data-lucide="trash-2" size="16"></i></button>
+                    </div>
+                </div>`).join('');
+
+            document.getElementById('r-list').innerHTML = db.reminders.map((r,i) => `
+                <div class="glass p-5 rounded-2xl flex justify-between items-center border-l-4 border-green-500">
+                    <div><p class="text-xs font-bold text-white uppercase">${r.name}</p><p class="text-[10px] text-gray-400">${r.phone}</p><p class="text-[9px] text-gray-600 mt-1">${new Date(r.date).toLocaleString()}</p></div>
+                    <div class="flex gap-2">
+                        <button onclick="editR(${i})" class="p-2 text-gray-400"><i data-lucide="edit-3" size="16"></i></button>
+                        <button onclick="delR(${i})" class="p-2 text-red-500"><i data-lucide="calendar-x" size="16"></i></button>
+                    </div>
+                </div>`).join('');
+
+            document.getElementById('e-list').innerHTML = db.excluded.map((e,i) => `
+                <div class="glass p-5 rounded-2xl flex justify-between items-center border-l-4 border-zinc-700">
+                    <div><p class="text-xs font-bold uppercase">${e.name}</p><p class="text-[10px] text-gray-500">${e.phone}</p></div>
+                    <div class="flex gap-2">
+                        <button onclick="editE(${i})" class="p-2 text-gray-400"><i data-lucide="edit-3" size="16"></i></button>
+                        <button onclick="delE(${i})" class="p-2 text-red-500"><i data-lucide="user-x" size="16"></i></button>
+                    </div>
+                </div>`).join('');
+
+            lucide.createIcons();
+        }
+
+        async function saveT() {
+            const id = document.getElementById('t-id').value;
+            const key = document.getElementById('t-key').value;
+            const response = document.getElementById('t-res').value;
+            if(!key || !response) return;
+            await fetch('/api/train', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, key, response}) });
+            document.getElementById('t-id').value=""; document.getElementById('t-key').value=""; document.getElementById('t-res').value="";
+            load();
+        }
+        function editT(i) {
+            const item = db.training[i];
+            document.getElementById('t-id').value = i;
+            document.getElementById('t-key').value = item.key;
+            document.getElementById('t-res').value = item.response;
+            nav('train');
+        }
+        async function delT(i) { await fetch('/api/train/'+i, {method:'DELETE'}); load(); }
+
+        async function saveR() {
+            const id = document.getElementById('r-id').value;
+            const name = document.getElementById('r-name').value;
+            const phone = document.getElementById('r-phone').value;
+            const message = document.getElementById('r-msg').value;
+            const freq = document.getElementById('r-freq').value;
+            const date = document.getElementById('r-date').value;
+            if(!name || !phone || !message || !date) return;
+            await fetch('/api/reminders', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, name, phone, message, freq, date}) });
+            document.getElementById('r-id').value=""; document.getElementById('r-name').value=""; document.getElementById('r-phone').value=""; document.getElementById('r-msg').value="";
+            load();
+        }
+        function editR(i) {
+            const item = db.reminders[i];
+            document.getElementById('r-id').value = i;
+            document.getElementById('r-name').value = item.name;
+            document.getElementById('r-phone').value = item.phone;
+            document.getElementById('r-msg').value = item.message;
+            document.getElementById('r-freq').value = item.freq;
+            document.getElementById('r-date').value = item.date.substring(0,16);
+            nav('rem');
+        }
+        async function delR(i) { await fetch('/api/reminders/'+i, {method:'DELETE'}); load(); }
+
+        async function saveE() {
+            const id = document.getElementById('e-id').value;
+            const name = document.getElementById('e-name').value;
+            const phone = document.getElementById('e-phone').value;
+            if(!name || !phone) return;
+            await fetch('/api/exclude', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, name, phone}) });
+            document.getElementById('e-id').value=""; document.getElementById('e-name').value=""; document.getElementById('e-phone').value="";
+            load();
+        }
+        function editE(i) {
+            const item = db.excluded[i];
+            document.getElementById('e-id').value = i;
+            document.getElementById('e-name').value = item.name;
+            document.getElementById('e-phone').value = item.phone;
+            nav('excl');
+        }
+        async function delE(i) { await fetch('/api/exclude/'+i, {method:'DELETE'}); load(); }
+
+        async function logoutWA() { if(confirm("¿Seguro que deseas desvincular GZMBOT?")) { await fetch('/api/logout-wa', {method:'POST'}); location.reload(); } }
+        async function load() { const r = await fetch('/api/data'); db = await r.json(); render(); }
+
+        load();
+        nav('dash');
+    </script>
+</body>
+</html>
+EOF
+
+# 6. Login
+cat <<'EOF' > views/login.html
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Login</title><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-[#09090b] h-screen flex items-center justify-center p-6 text-white font-sans">
+<form action="/login" method="POST" class="w-full max-w-xs p-10 rounded-[3rem] text-center border border-white/5" style="background:rgba(24,24,27,0.8); backdrop-filter:blur(10px);">
+<h2 class="text-4xl font-bold mb-10 tracking-tighter">GZMBOT</h2>
+<div class="space-y-4 mb-8">
+<input type="text" name="user" placeholder="Usuario" class="w-full p-4 bg-zinc-900/50 rounded-2xl outline-none border border-zinc-800 focus:border-blue-500 transition">
+<input type="password" name="pass" placeholder="Contraseña" class="w-full p-4 bg-zinc-900/50 rounded-2xl outline-none border border-zinc-800 focus:border-blue-500 transition">
+</div>
+<button class="w-full p-4 bg-blue-600 rounded-2xl font-bold uppercase text-xs tracking-widest shadow-lg shadow-blue-500/20">Acceder</button>
+</form></body></html>
+EOF
+
+# 7. Ejecución
+echo "[7/7] Activando GZMBOT..."
+npm install whatsapp-web.js qrcode express socket.io express-session helmet puppeteer
+sudo npm install -g pm2
+pm2 delete gzmbot 2>/dev/null
+pm2 start app.js --name gzmbot
+pm2 save
+pm2 startup
+
+echo "===================================================="
+echo "✅ GZMBOT REPARADO Y OPTIMIZADO"
+echo "===================================================="
+echo "Recordatorios Limpios: ACTIVADO"
+echo "Edición con Nombres: ACTIVADO"
+echo "Dashboard Limpio: ACTIVADO"
+echo "URL: http://$(curl -s ifconfig.me)"
+echo "===================================================="
+
