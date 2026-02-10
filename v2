@@ -1,0 +1,644 @@
+#!/bin/bash
+
+# ============================================================
+# GZMBOT - VERSIÓN CORREGIDA Y OPTIMIZADA
+# ============================================================
+
+clear
+echo "🚀 Iniciando Instalación de GZMBOT (Versión Estabilizada)..."
+
+# 1. Captura de credenciales
+read -p "👤 Usuario para el Panel: " ADMIN_USER
+read -sp "🔐 Contraseña para el Panel: " ADMIN_PASS
+echo -e "\n"
+
+# 2. Instalación de dependencias del sistema
+echo "[1/4] Instalando dependencias de sistema y Chrome..."
+sudo apt-get update
+sudo apt-get install -y \
+    curl build-essential ffmpeg libnss3 libatk-bridge2.0-0 \
+    libxcomposite1 libxrandr2 libgbm1 libasound2 fonts-liberation \
+    libpangocairo-1.0-0 libxcursor1 libxdamage1 libxi6 libxtst6 \
+    libcups2 libxss1 libxshmfence1
+
+# Instalar Node.js 18 si no existe
+if ! command -v node &> /dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+fi
+
+# 3. Preparación de carpetas
+mkdir -p $HOME/gzmbot/views
+cd $HOME/gzmbot
+
+# Configuración inicial
+cat <<EOF > config.json
+{
+  "adminUser": "$ADMIN_USER",
+  "adminPassword": "$ADMIN_PASS",
+  "port": 80,
+  "sessionSecret": "$(openssl rand -hex 16)"
+}
+EOF
+
+# Crear DB inicial si no existe
+if [ ! -f data.json ]; then
+cat <<EOF > data.json
+{
+  "training": [],
+  "reminders": [],
+  "excluded": [],
+  "stats": { "replied": 0, "total": 0 }
+}
+EOF
+fi
+
+# 4. Servidor Backend (app.js)
+cat <<'EOF' > app.js
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const session = require('express-session');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
+
+const DATA_PATH = path.join(__dirname, 'data.json');
+const CONFIG_PATH = path.join(__dirname, 'config.json');
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+let config = JSON.parse(fs.readFileSync(CONFIG_PATH));
+app.use(session({
+    secret: config.sessionSecret,
+    resave: false,
+    saveUninitialized: false
+}));
+
+const loadDB = () => JSON.parse(fs.readFileSync(DATA_PATH));
+const saveDB = (data) => fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
+
+let client;
+let botStatus = "Iniciando...";
+let lastQR = null;
+
+function initBot() {
+    client = new Client({
+        authStrategy: new LocalAuth({ dataPath: path.join(__dirname, '.wwebjs_auth') }),
+        puppeteer: {
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        }
+    });
+
+    client.on('qr', (qr) => {
+        botStatus = "Esperando QR";
+        lastQR = qr;
+        qrcode.toDataURL(qr, (err, url) => {
+            io.emit('bot_qr', url);
+            io.emit('bot_status', botStatus);
+        });
+    });
+
+    client.on('ready', () => {
+        botStatus = "Conectado";
+        lastQR = null;
+        io.emit('bot_status', botStatus);
+        io.emit('bot_qr', null);
+    });
+
+    client.on('disconnected', async () => {
+        botStatus = "Desconectado";
+        io.emit('bot_status', botStatus);
+        try { await client.destroy(); } catch(e){}
+        initBot();
+    });
+
+    client.on('message', async (msg) => {
+        const db = loadDB();
+        const phone = msg.from.split('@')[0];
+        if (db.excluded.some(ex => phone === ex.phone)) return;
+
+        const trigger = db.training.find(t => msg.body.toLowerCase().includes(t.key.toLowerCase()));
+        if(trigger) {
+            await msg.reply(trigger.response);
+            db.stats.replied++;
+        }
+        db.stats.total++;
+        saveDB(db);
+        io.emit('update_ui', db);
+    });
+
+    client.initialize().catch(e => console.error("Error Init:", e));
+}
+
+initBot();
+
+// Middleware de Auth
+const auth = (req, res, next) => req.session.user ? next() : res.redirect('/login');
+
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'views/login.html')));
+app.post('/login', (req, res) => {
+    const currentConfig = JSON.parse(fs.readFileSync(CONFIG_PATH));
+    if(req.body.user === currentConfig.adminUser && req.body.pass === currentConfig.adminPassword) {
+        req.session.user = currentConfig.adminUser;
+        res.redirect('/');
+    } else res.redirect('/login?err=1');
+});
+app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login'); });
+app.get('/', auth, (req, res) => res.sendFile(path.join(__dirname, 'views/index.html')));
+
+// API CRUD
+app.get('/api/data', auth, (req, res) => {
+    res.json({ ...loadDB(), botStatus, qrCode: lastQR });
+});
+
+app.post('/api/train', auth, (req, res) => {
+    const db = loadDB();
+    const { id, key, response } = req.body;
+    if (id !== "" && id !== null && id !== undefined) {
+        db.training[parseInt(id)] = { key, response };
+    } else {
+        db.training.push({ key, response });
+    }
+    saveDB(db);
+    res.json({ ok: true });
+});
+
+app.delete('/api/train/:id', auth, (req, res) => {
+    const db = loadDB();
+    db.training.splice(parseInt(req.params.id), 1);
+    saveDB(db);
+    res.json({ ok: true });
+});
+
+app.post('/api/reminders', auth, (req, res) => {
+    const db = loadDB();
+    const { id, name, phone, message, freq, date } = req.body;
+    const item = { name, phone: phone.replace(/\D/g, ''), message, freq, date };
+    if (id !== "" && id !== null && id !== undefined) {
+        db.reminders[parseInt(id)] = item;
+    } else {
+        db.reminders.push(item);
+    }
+    saveDB(db);
+    res.json({ ok: true });
+});
+
+app.delete('/api/reminders/:id', auth, (req, res) => {
+    const db = loadDB();
+    db.reminders.splice(parseInt(req.params.id), 1);
+    saveDB(db);
+    res.json({ ok: true });
+});
+
+app.post('/api/exclude', auth, (req, res) => {
+    const db = loadDB();
+    db.excluded.push({ name: req.body.name, phone: req.body.phone.replace(/\D/g, '') });
+    saveDB(db);
+    res.json({ ok: true });
+});
+
+app.delete('/api/exclude/:id', auth, (req, res) => {
+    const db = loadDB();
+    db.excluded.splice(parseInt(req.params.id), 1);
+    saveDB(db);
+    res.json({ ok: true });
+});
+
+app.post('/api/config', auth, (req, res) => {
+    let currentConfig = JSON.parse(fs.readFileSync(CONFIG_PATH));
+    if(req.body.newUser) currentConfig.adminUser = req.body.newUser;
+    if(req.body.newPass) currentConfig.adminPassword = req.body.newPass;
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(currentConfig, null, 2));
+    res.json({ ok: true });
+});
+
+app.post('/api/logout-wa', auth, async (req, res) => {
+    try {
+        await client.logout();
+        const authDir = path.join(__dirname, '.wwebjs_auth');
+        if(fs.existsSync(authDir)) fs.rmSync(authDir, { recursive: true, force: true });
+        res.json({ ok: true });
+        setTimeout(() => process.exit(1), 1500); // PM2 reiniciará y pedirá nuevo QR
+    } catch (e) { res.status(500).send(e.message); }
+});
+
+server.listen(config.port, '0.0.0.0', () => console.log(`Server on port ${config.port}`));
+EOF
+
+# 5. Interfaz de Usuario Mejorada (index.html)
+cat <<'EOF' > views/index.html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GZMBOT | Control Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body { background: #070709; color: #e4e4e7; font-family: 'Plus Jakarta Sans', sans-serif; overflow: hidden; }
+        .glass { background: rgba(20, 20, 25, 0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); }
+        .page { display: none; height: calc(100vh - 80px); overflow-y: auto; padding: 2rem; animation: slideUp 0.3s ease-out; }
+        .page.active { display: block; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        input, select, textarea { background: #121216 !important; border: 1px solid #27272a !important; color: white !important; }
+        .nav-btn { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; color: #71717a; transition: 0.2s; width: 100%; }
+        .nav-btn:hover { background: #18181b; color: white; }
+        .nav-btn.active { background: #2563eb; color: white; }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+    <header class="h-[80px] px-8 flex justify-between items-center glass z-50">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
+                <i data-lucide="zap" class="text-white"></i>
+            </div>
+            <span class="text-xl font-black tracking-tighter">GZMBOT</span>
+        </div>
+        <div class="flex items-center gap-4">
+            <div id="status-badge" class="px-4 py-1.5 rounded-full bg-black/40 border border-white/5 flex items-center gap-2">
+                <div id="status-dot" class="w-2 h-2 rounded-full bg-gray-500"></div>
+                <span id="bot-status-text" class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Iniciando</span>
+            </div>
+            <button onclick="toggleSidebar()" class="lg:hidden p-2 bg-white/5 rounded-lg"><i data-lucide="menu"></i></button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <aside id="sidebar" class="fixed lg:static inset-y-0 left-0 w-64 glass lg:translate-x-0 -translate-x-full transition-transform z-[60] p-6 flex flex-col">
+            <nav class="space-y-1 flex-1">
+                <button onclick="nav('dash')" id="btn-dash" class="nav-btn active"><i data-lucide="layout-dashboard"></i> Dashboard</button>
+                <button onclick="nav('conn')" id="btn-conn" class="nav-btn"><i data-lucide="qr-code"></i> Vinculación</button>
+                <div class="py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Bot AI</div>
+                <button onclick="nav('train')" id="btn-train" class="nav-btn"><i data-lucide="message-square"></i> Respuestas</button>
+                <button onclick="nav('rem')" id="btn-rem" class="nav-btn"><i data-lucide="calendar"></i> Recordatorios</button>
+                <button onclick="nav('excl')" id="btn-excl" class="nav-btn"><i data-lucide="user-x"></i> Excluidos</button>
+                <button onclick="nav('config')" id="btn-config" class="nav-btn mt-4"><i data-lucide="settings"></i> Ajustes</button>
+            </nav>
+            <a href="/logout" class="p-4 bg-red-500/10 text-red-500 rounded-xl flex items-center gap-3 font-bold text-sm">
+                <i data-lucide="log-out"></i> Cerrar Panel
+            </a>
+        </aside>
+
+        <main class="flex-1 relative">
+            <!-- DASHBOARD -->
+            <div id="p-dash" class="page active">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="glass p-8 rounded-3xl">
+                        <p class="text-gray-500 text-xs font-bold uppercase mb-2">Respuestas Automáticas</p>
+                        <h3 id="s-replied" class="text-5xl font-black text-blue-500">0</h3>
+                    </div>
+                    <div class="glass p-8 rounded-3xl">
+                        <p class="text-gray-500 text-xs font-bold uppercase mb-2">Total Mensajes</p>
+                        <h3 id="s-total" class="text-5xl font-black text-white">0</h3>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VINCULACION -->
+            <div id="p-conn" class="page">
+                <div class="max-w-md mx-auto text-center mt-12">
+                    <div id="qr-box" class="glass p-10 rounded-[3rem] shadow-2xl">
+                        <div id="qr-img" class="bg-white p-4 rounded-3xl inline-block mb-6 min-w-[200px] min-h-[200px] flex items-center justify-center">
+                            <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent animate-spin rounded-full"></div>
+                        </div>
+                        <h3 class="text-2xl font-bold mb-2">Conexión WhatsApp</h3>
+                        <p id="conn-desc" class="text-gray-500 text-sm mb-8">Escanea el código para activar el bot.</p>
+                        <div id="active-actions" class="hidden">
+                            <div class="flex items-center justify-center gap-2 text-green-500 font-bold mb-8">
+                                <i data-lucide="check-circle"></i> BOT CONECTADO
+                            </div>
+                            <button onclick="logoutWA()" class="w-full py-4 bg-red-500/10 text-red-500 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition">DESVINCULAR WHATSAPP</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RESPUESTAS -->
+            <div id="p-train" class="page">
+                <div class="max-w-3xl mx-auto space-y-6">
+                    <div class="glass p-6 rounded-3xl">
+                        <h3 class="font-bold mb-4">Configurar Respuesta</h3>
+                        <input type="hidden" id="t-id">
+                        <div class="space-y-4">
+                            <input type="text" id="t-key" placeholder="Palabra clave" class="w-full p-4 rounded-xl outline-none">
+                            <textarea id="t-res" placeholder="Respuesta del bot" class="w-full p-4 rounded-xl h-32 outline-none"></textarea>
+                            <button onclick="saveT()" class="w-full py-4 bg-blue-600 rounded-xl font-bold">GUARDAR CONFIGURACIÓN</button>
+                        </div>
+                    </div>
+                    <div id="t-list" class="space-y-3"></div>
+                </div>
+            </div>
+
+            <!-- RECORDATORIOS -->
+            <div id="p-rem" class="page">
+                <div class="max-w-3xl mx-auto space-y-6">
+                    <div class="glass p-6 rounded-3xl">
+                        <h3 class="font-bold mb-4">Nuevo Recordatorio</h3>
+                        <input type="hidden" id="r-id">
+                        <div class="grid grid-cols-2 gap-4">
+                            <input type="text" id="r-name" placeholder="Nombre cliente" class="p-4 rounded-xl outline-none">
+                            <input type="text" id="r-phone" placeholder="Número (ej: 18491234567)" class="p-4 rounded-xl outline-none">
+                            <input type="text" id="r-msg" placeholder="Mensaje a enviar" class="col-span-2 p-4 rounded-xl outline-none">
+                            <select id="r-freq" class="p-4 rounded-xl outline-none">
+                                <option>Una vez</option>
+                                <option>Diario</option>
+                                <option>Semanal</option>
+                                <option>Mensual</option>
+                                <option>Anual</option>
+                            </select>
+                            <input type="datetime-local" id="r-date" class="p-4 rounded-xl outline-none">
+                        </div>
+                        <button onclick="saveR()" class="w-full py-4 bg-green-600 rounded-xl font-bold mt-4">AGENDAR</button>
+                    </div>
+                    <div id="r-list" class="space-y-2"></div>
+                </div>
+            </div>
+
+            <!-- EXCLUIDOS -->
+            <div id="p-excl" class="page">
+                <div class="max-w-xl mx-auto space-y-6">
+                    <div class="glass p-6 rounded-3xl">
+                        <h3 class="font-bold mb-4">Ignorar Número</h3>
+                        <div class="flex gap-2">
+                            <input type="text" id="e-name" placeholder="Nombre" class="w-1/2 p-4 rounded-xl outline-none">
+                            <input type="text" id="e-phone" placeholder="WhatsApp" class="w-1/2 p-4 rounded-xl outline-none">
+                        </div>
+                        <button onclick="saveE()" class="w-full py-4 bg-zinc-800 rounded-xl font-bold mt-4">AÑADIR A LA LISTA</button>
+                    </div>
+                    <div id="e-list" class="space-y-2"></div>
+                </div>
+            </div>
+
+            <!-- AJUSTES -->
+            <div id="p-config" class="page">
+                <div class="max-w-md mx-auto glass p-8 rounded-3xl">
+                    <h3 class="font-bold mb-6 flex items-center gap-2"><i data-lucide="shield"></i> Seguridad Panel</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="text-[10px] uppercase text-gray-500 font-bold ml-1">Nuevo Usuario</label>
+                            <input type="text" id="conf-user" class="w-full p-4 rounded-xl mt-1 outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[10px] uppercase text-gray-500 font-bold ml-1">Nueva Contraseña</label>
+                            <input type="password" id="conf-pass" class="w-full p-4 rounded-xl mt-1 outline-none">
+                        </div>
+                        <button onclick="saveConfig()" class="w-full py-4 bg-blue-600 rounded-xl font-bold">ACTUALIZAR CREDENCIALES</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentDB = { training:[], reminders:[], excluded:[], stats:{} };
+
+        function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); }
+
+        function nav(id) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('p-'+id).classList.add('active');
+            document.getElementById('btn-'+id).classList.add('active');
+            if(window.innerWidth < 1024) toggleSidebar();
+            lucide.createIcons();
+        }
+
+        socket.on('bot_status', s => {
+            document.getElementById('bot-status-text').innerText = s;
+            const dot = document.getElementById('status-dot');
+            dot.className = `w-2 h-2 rounded-full ${s === 'Conectado' ? 'bg-green-500' : 'bg-orange-500 animate-pulse'}`;
+            
+            if(s === 'Conectado') {
+                document.getElementById('qr-img').innerHTML = '<div class="text-green-500"><i data-lucide="check-circle" class="w-12 h-12"></i></div>';
+                document.getElementById('active-actions').classList.remove('hidden');
+                document.getElementById('conn-desc').classList.add('hidden');
+                lucide.createIcons();
+            } else {
+                document.getElementById('active-actions').classList.add('hidden');
+                document.getElementById('conn-desc').classList.remove('hidden');
+            }
+        });
+
+        socket.on('bot_qr', url => {
+            if(url) {
+                document.getElementById('qr-img').innerHTML = `<img src="${url}" class="w-48 h-48">`;
+            }
+        });
+
+        socket.on('update_ui', data => { currentDB = data; render(); });
+
+        async function load() {
+            const res = await fetch('/api/data');
+            const data = await res.json();
+            currentDB = data;
+            
+            // Forzar UI de conexión si ya está conectado
+            if(data.botStatus === 'Conectado') {
+                socket.emit('request_status'); // Pedir actualización
+                document.getElementById('bot-status-text').innerText = "Conectado";
+                document.getElementById('status-dot').className = "w-2 h-2 rounded-full bg-green-500";
+                document.getElementById('qr-img').innerHTML = '<div class="text-green-500"><i data-lucide="check-circle" class="w-12 h-12"></i></div>';
+                document.getElementById('active-actions').classList.remove('hidden');
+                document.getElementById('conn-desc').classList.add('hidden');
+            } else if(data.qrCode) {
+                // Si hay un QR pendiente lo generamos
+                socket.emit('get_last_qr'); 
+            }
+            render();
+            lucide.createIcons();
+        }
+
+        function render() {
+            document.getElementById('s-replied').innerText = currentDB.stats.replied || 0;
+            document.getElementById('s-total').innerText = currentDB.stats.total || 0;
+
+            // Listas
+            document.getElementById('t-list').innerHTML = currentDB.training.map((t,i) => `
+                <div class="glass p-4 rounded-2xl flex justify-between items-center">
+                    <div><b class="text-blue-500 text-sm">${t.key}</b><p class="text-xs text-gray-400 mt-1">${t.response}</p></div>
+                    <div class="flex gap-2">
+                        <button onclick="editT(${i})" class="p-2 hover:bg-white/5 rounded-lg"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                        <button onclick="delT(${i})" class="p-2 text-red-500 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash" class="w-4 h-4"></i></button>
+                    </div>
+                </div>`).join('');
+
+            document.getElementById('r-list').innerHTML = currentDB.reminders.map((r,i) => `
+                <div class="glass p-4 rounded-2xl flex justify-between items-center border-l-4 border-green-600">
+                    <div><b class="text-sm">${r.name}</b><p class="text-[10px] text-gray-500">${r.phone} | ${r.freq}</p></div>
+                    <div class="flex gap-2">
+                        <button onclick="editR(${i})" class="p-2 hover:bg-white/5 rounded-lg"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                        <button onclick="delR(${i})" class="p-2 text-red-500 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash" class="w-4 h-4"></i></button>
+                    </div>
+                </div>`).join('');
+
+            document.getElementById('e-list').innerHTML = currentDB.excluded.map((e,i) => `
+                <div class="glass p-4 rounded-2xl flex justify-between items-center">
+                    <div><b class="text-sm">${e.name}</b><p class="text-xs text-gray-500">${e.phone}</p></div>
+                    <button onclick="delE(${i})" class="p-2 text-red-500"><i data-lucide="user-minus" class="w-4 h-4"></i></button>
+                </div>`).join('');
+            
+            lucide.createIcons();
+        }
+
+        // Acciones API
+        async function saveT() {
+            const id = document.getElementById('t-id').value;
+            const key = document.getElementById('t-key').value;
+            const response = document.getElementById('t-res').value;
+            if(!key || !response) return;
+            await fetch('/api/train', { 
+                method: 'POST', 
+                headers: {'Content-Type':'application/json'}, 
+                body: JSON.stringify({id, key, response}) 
+            });
+            document.getElementById('t-id').value=""; 
+            document.getElementById('t-key').value=""; 
+            document.getElementById('t-res').value="";
+            load();
+        }
+        function editT(i) {
+            document.getElementById('t-id').value = i;
+            document.getElementById('t-key').value = currentDB.training[i].key;
+            document.getElementById('t-res').value = currentDB.training[i].response;
+            window.scrollTo(0,0);
+        }
+        async function delT(i) {
+            if(confirm("¿Eliminar esta respuesta?")) {
+                await fetch('/api/train/'+i, { method:'DELETE' });
+                load();
+            }
+        }
+
+        async function saveR() {
+            const data = {
+                id: document.getElementById('r-id').value,
+                name: document.getElementById('r-name').value,
+                phone: document.getElementById('r-phone').value,
+                message: document.getElementById('r-msg').value,
+                freq: document.getElementById('r-freq').value,
+                date: document.getElementById('r-date').value
+            };
+            await fetch('/api/reminders', { 
+                method: 'POST', 
+                headers: {'Content-Type':'application/json'}, 
+                body: JSON.stringify(data) 
+            });
+            document.getElementById('r-id').value="";
+            load();
+        }
+        function editR(i) {
+            const r = currentDB.reminders[i];
+            document.getElementById('r-id').value = i;
+            document.getElementById('r-name').value = r.name;
+            document.getElementById('r-phone').value = r.phone;
+            document.getElementById('r-msg').value = r.message;
+            document.getElementById('r-freq').value = r.freq;
+            document.getElementById('r-date').value = r.date;
+        }
+        async function delR(i) {
+            await fetch('/api/reminders/'+i, { method:'DELETE' });
+            load();
+        }
+
+        async function saveE() {
+            const name = document.getElementById('e-name').value;
+            const phone = document.getElementById('e-phone').value;
+            await fetch('/api/exclude', { 
+                method: 'POST', 
+                headers: {'Content-Type':'application/json'}, 
+                body: JSON.stringify({name, phone}) 
+            });
+            load();
+        }
+        async function delE(i) {
+            await fetch('/api/exclude/'+i, { method:'DELETE' });
+            load();
+        }
+
+        async function saveConfig() {
+            const newUser = document.getElementById('conf-user').value;
+            const newPass = document.getElementById('conf-pass').value;
+            await fetch('/api/config', { 
+                method: 'POST', 
+                headers: {'Content-Type':'application/json'}, 
+                body: JSON.stringify({newUser, newPass}) 
+            });
+            alert("Credenciales actualizadas. Inicie sesión de nuevo.");
+            location.href = '/logout';
+        }
+
+        async function logoutWA() {
+            if(confirm("¿Desvincular WhatsApp? El bot se detendrá y pedirá nuevo QR.")) {
+                await fetch('/api/logout-wa', { method: 'POST' });
+                location.reload();
+            }
+        }
+
+        window.onload = load;
+    </script>
+</body>
+</html>
+EOF
+
+# 6. Login UI (login.html)
+cat <<'EOF' > views/login.html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | GZMBOT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #070709; color: white; font-family: sans-serif; }
+        .card { background: rgba(20, 20, 25, 0.6); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.05); }
+    </style>
+</head>
+<body class="h-screen flex items-center justify-center p-6">
+    <div class="w-full max-w-sm">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-black italic tracking-tighter">GZMBOT</h1>
+            <p class="text-gray-500 text-xs font-bold uppercase tracking-widest mt-2">Acceso al Panel</p>
+        </div>
+        <form action="/login" method="POST" class="card p-8 rounded-[2.5rem] shadow-2xl space-y-4">
+            <input type="text" name="user" placeholder="Usuario" class="w-full p-4 rounded-2xl bg-black/40 border border-white/5 outline-none focus:border-blue-500 transition" required>
+            <input type="password" name="pass" placeholder="Contraseña" class="w-full p-4 rounded-2xl bg-black/40 border border-white/5 outline-none focus:border-blue-500 transition" required>
+            <button class="w-full py-4 bg-blue-600 rounded-2xl font-bold shadow-lg shadow-blue-600/30 hover:scale-[1.02] active:scale-95 transition">ENTRAR</button>
+        </form>
+    </div>
+</body>
+</html>
+EOF
+
+# 7. Instalación de NPM y Lanzamiento
+echo "[4/4] Finalizando instalación de paquetes..."
+npm install whatsapp-web.js qrcode express socket.io express-session puppeteer
+sudo npm install -g pm2
+
+# Configurar PM2 para inicio automático
+pm2 delete gzmbot 2>/dev/null
+pm2 start app.js --name gzmbot
+pm2 save
+pm2 startup
+
+IP_PUB=$(curl -s ifconfig.me)
+echo "===================================================="
+echo "✅ GZMBOT INSTALADO Y CORREGIDO"
+echo "===================================================="
+echo "Panel: http://$IP_PUB"
+echo "Usuario: $ADMIN_USER"
+echo "Contraseña: $ADMIN_PASS"
+echo "===================================================="
+
