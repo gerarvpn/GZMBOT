@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # ============================================================
-# GZMBOT - ULTIMATE ENTERPRISE EDITION (ENHANCED VERSION PRO)
+# GZMBOT - ULTIMATE ENTERPRISE EDITION (FIXED & ENHANCED)
 # ============================================================
 
 clear
-echo "🚀 Iniciando Instalación de GZMBOT (Versión Pro)..."
+echo "🚀 Iniciando Instalación de GZMBOT (Versión Corregida)..."
 
 # 1. Credenciales Iniciales
 read -p "👤 Usuario Maestro: " ADMIN_USER
@@ -41,7 +41,7 @@ cat <<EOF > config.json
 }
 EOF
 
-# 5. Backend (app.js) - ENHANCED PRO
+# 5. Backend (app.js) - FIXED
 cat <<'EOF' > app.js
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
@@ -91,7 +91,6 @@ const upload = multer({ storage });
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/media', express.static(MEDIA_PATH));
-app.use('/backups', express.static(BACKUP_PATH));
 
 const getConfig = () => JSON.parse(fs.readFileSync(CONFIG_PATH));
 let config = getConfig();
@@ -137,6 +136,7 @@ function initBot() {
         lastQR = null;
         io.emit('status_update', botStatus);
         io.emit('connection_status', { connected: true, status: botStatus });
+        console.log('✅ Bot conectado correctamente');
     });
 
     client.on('disconnected', () => {
@@ -144,6 +144,7 @@ function initBot() {
         isConnected = false;
         io.emit('status_update', botStatus);
         io.emit('connection_status', { connected: false, status: botStatus });
+        console.log('❌ Bot desconectado');
     });
 
     client.on('message', async (msg) => {
@@ -204,49 +205,46 @@ function initBot() {
 // Función para crear backup
 async function createBackup() {
     try {
-        const db = getDB();
+        const timestamp = moment().tz(TZ).format('YYYY-MM-DD_HH-mm-ss');
         const backupData = {
-            training: db.training,
-            reminders: db.reminders,
-            excluded: db.excluded,
-            stats: db.stats,
-            date: moment().tz(TZ).format('YYYY-MM-DD HH:mm:ss')
+            date: moment().tz(TZ).format('DD/MM/YYYY HH:mm'),
+            database: getDB(),
+            config: getConfig()
         };
         
-        const filename = `backup-${moment().tz(TZ).format('YYYY-MM-DD-HHmmss')}.json`;
-        const filepath = path.join(BACKUP_PATH, filename);
+        const backupFile = path.join(BACKUP_PATH, `backup_${timestamp}.json`);
+        fs.writeFileSync(backupFile, JSON.stringify(backupData, null, 2));
         
-        fs.writeFileSync(filepath, JSON.stringify(backupData, null, 2));
-        
-        // Enviar backup al número configurado
-        const freshConfig = getConfig();
-        if (freshConfig.backupPhone && isConnected) {
-            try {
-                const chatId = freshConfig.backupPhone.includes('@') ? 
-                    freshConfig.backupPhone : `${freshConfig.backupPhone}@c.us`;
-                
-                const media = MessageMedia.fromFilePath(filepath);
-                await client.sendMessage(chatId, media, {
-                    caption: `🔒 BACKUP AUTOMÁTICO GZMBOT\n\n📅 Fecha: ${backupData.date}\n📊 Respuestas: ${db.training.length}\n⏰ Recordatorios: ${db.reminders.length}\n🚫 Excluidos: ${db.excluded.length}`
-                });
-                
-                console.log('✅ Backup enviado correctamente a:', freshConfig.backupPhone);
-            } catch (e) {
-                console.error('Error enviando backup:', e);
-            }
-        }
-        
-        return filename;
+        console.log('✅ Backup creado:', backupFile);
+        return backupFile;
     } catch (e) {
-        console.error('Error creando backup:', e);
+        console.error('❌ Error creando backup:', e);
         return null;
     }
 }
 
-// Cron para backup automático diario a las 12 AM
+// Cron para backup automático a las 12 AM
 cron.schedule('0 0 * * *', async () => {
-    console.log('⏰ Ejecutando backup automático...');
-    await createBackup();
+    console.log('🔄 Iniciando backup automático...');
+    const backupFile = await createBackup();
+    
+    if (backupFile && isConnected) {
+        const freshConfig = getConfig();
+        if (freshConfig.backupPhone && freshConfig.backupPhone.trim() !== '') {
+            try {
+                const chatId = freshConfig.backupPhone.includes('@') ? 
+                    freshConfig.backupPhone : `${freshConfig.backupPhone}@c.us`;
+                
+                const media = MessageMedia.fromFilePath(backupFile);
+                await client.sendMessage(chatId, media, {
+                    caption: `🔐 *Backup Automático GZMBOT*\n\n📅 Fecha: ${moment().tz(TZ).format('DD/MM/YYYY HH:mm')}\n\n✅ Copia de seguridad completada`
+                });
+                console.log('✅ Backup enviado a WhatsApp');
+            } catch (e) {
+                console.error('❌ Error enviando backup:', e);
+            }
+        }
+    }
 }, { timezone: TZ });
 
 // Cron para recordatorios
@@ -304,7 +302,8 @@ app.get('/api/data', checkAuth, (req, res) => {
         ...getDB(), 
         botStatus, 
         qr: lastQR,
-        isConnected 
+        isConnected,
+        backupPhone: getConfig().backupPhone || ''
     });
 });
 
@@ -319,7 +318,7 @@ app.post('/api/train', checkAuth, upload.single('media'), (req, res) => {
         mediaType: req.file ? req.file.mimetype : null
     };
     
-    if (id !== "" && id !== null && id !== undefined) {
+    if (id !== "" && id !== null && id !== undefined && id !== "undefined") {
         // Eliminar archivo anterior si existe
         if (db.training[id]?.mediaPath && fs.existsSync(db.training[id].mediaPath)) {
             fs.unlinkSync(db.training[id].mediaPath);
@@ -330,61 +329,8 @@ app.post('/api/train', checkAuth, upload.single('media'), (req, res) => {
     }
     
     saveDB(db);
+    io.emit('data_update', db);
     res.json({ ok: true });
-});
-
-// Endpoint para importar respuestas desde archivo TXT
-app.post('/api/import-training', checkAuth, upload.single('trainFile'), (req, res) => {
-    try {
-        const content = fs.readFileSync(req.file.path, 'utf8');
-        const lines = content.split('\n');
-        const db = getDB();
-        
-        let imported = 0;
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (line.startsWith('P:')) {
-                const key = line.substring(2).trim();
-                if (i + 1 < lines.length && lines[i + 1].trim().startsWith('R:')) {
-                    const response = lines[i + 1].substring(2).trim();
-                    db.training.push({ key, response, mediaPath: null, mediaType: null });
-                    imported++;
-                    i++; // Saltar la línea de respuesta
-                }
-            }
-        }
-        
-        saveDB(db);
-        fs.unlinkSync(req.file.path); // Eliminar archivo temporal
-        res.json({ ok: true, imported });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
-});
-
-// Endpoint para exportar respuestas a TXT
-app.get('/api/export-training', checkAuth, (req, res) => {
-    const db = getDB();
-    let content = '# GZMBOT - ARCHIVO DE ENTRENAMIENTO\n';
-    content += '# Formato: P: pregunta | R: respuesta\n';
-    content += '# Ejemplo:\n';
-    content += '# P: hola\n';
-    content += '# R: ¡Hola! ¿En qué puedo ayudarte?\n\n';
-    
-    db.training.forEach(t => {
-        if (!t.mediaPath) { // Solo exportar respuestas de texto
-            content += `P: ${t.key}\n`;
-            content += `R: ${t.response}\n\n`;
-        }
-    });
-    
-    const filename = `respuestas-${moment().tz(TZ).format('YYYY-MM-DD')}.txt`;
-    const filepath = path.join(BACKUP_PATH, filename);
-    
-    fs.writeFileSync(filepath, content);
-    res.download(filepath, filename, (err) => {
-        if (!err) fs.unlinkSync(filepath);
-    });
 });
 
 app.delete('/api/train/:id', checkAuth, (req, res) => {
@@ -398,7 +344,134 @@ app.delete('/api/train/:id', checkAuth, (req, res) => {
     
     db.training.splice(req.params.id, 1);
     saveDB(db);
+    io.emit('data_update', db);
     res.json({ ok: true });
+});
+
+// Endpoint para descargar plantilla de entrenamiento
+app.get('/api/train/template', checkAuth, (req, res) => {
+    const template = `# PLANTILLA DE ENTRENAMIENTO GZMBOT
+# =====================================
+# 
+# FORMATO:
+# PREGUNTA: texto que el usuario escribe
+# RESPUESTA: texto que el bot responde
+# ---
+#
+# EJEMPLO:
+# PREGUNTA: hola
+# RESPUESTA: ¡Hola! ¿En qué puedo ayudarte hoy?
+# ---
+#
+# PREGUNTA: horario
+# RESPUESTA: Nuestro horario es de Lunes a Viernes de 9AM a 6PM
+# ---
+#
+# INSTRUCCIONES:
+# 1. Cada pregunta-respuesta debe estar separada por "---"
+# 2. Usa "PREGUNTA:" seguido del texto trigger
+# 3. Usa "RESPUESTA:" seguido de la respuesta del bot
+# 4. Las líneas que empiezan con "#" son comentarios
+# 5. No uses multimedia en este archivo (solo texto)
+
+PREGUNTA: hola
+RESPUESTA: ¡Hola! Bienvenido a nuestro servicio. ¿En qué puedo ayudarte?
+---
+
+PREGUNTA: horario
+RESPUESTA: Nuestro horario de atención es:\n📅 Lunes a Viernes: 9:00 AM - 6:00 PM\n📅 Sábados: 9:00 AM - 1:00 PM\n🚫 Domingos: Cerrado
+---
+
+PREGUNTA: precio
+RESPUESTA: Para información sobre precios, por favor contacta a nuestro equipo de ventas o visita nuestra página web.
+---
+
+PREGUNTA: ubicación
+RESPUESTA: Estamos ubicados en la Av. Principal #123, Ciudad. Puedes encontrarnos en Google Maps buscando nuestro nombre.
+---`;
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=plantilla_entrenamiento.txt');
+    res.send(template);
+});
+
+// Endpoint para importar archivo de entrenamiento
+app.post('/api/train/import', checkAuth, upload.single('file'), (req, res) => {
+    try {
+        const fileContent = fs.readFileSync(req.file.path, 'utf-8');
+        const lines = fileContent.split('\n');
+        
+        const db = getDB();
+        let currentQuestion = '';
+        let currentResponse = '';
+        let imported = 0;
+        
+        for (let line of lines) {
+            line = line.trim();
+            
+            // Ignorar comentarios y líneas vacías
+            if (line.startsWith('#') || line === '') continue;
+            
+            if (line.startsWith('PREGUNTA:')) {
+                currentQuestion = line.replace('PREGUNTA:', '').trim();
+            } else if (line.startsWith('RESPUESTA:')) {
+                currentResponse = line.replace('RESPUESTA:', '').trim();
+                // Reemplazar \n literales con saltos de línea reales
+                currentResponse = currentResponse.replace(/\\n/g, '\n');
+            } else if (line === '---' && currentQuestion && currentResponse) {
+                // Guardar pregunta-respuesta
+                db.training.push({
+                    key: currentQuestion,
+                    response: currentResponse,
+                    mediaPath: null,
+                    mediaType: null
+                });
+                imported++;
+                currentQuestion = '';
+                currentResponse = '';
+            }
+        }
+        
+        // Guardar última pregunta-respuesta si no termina con ---
+        if (currentQuestion && currentResponse) {
+            db.training.push({
+                key: currentQuestion,
+                response: currentResponse,
+                mediaPath: null,
+                mediaType: null
+            });
+            imported++;
+        }
+        
+        saveDB(db);
+        io.emit('data_update', db);
+        fs.unlinkSync(req.file.path); // Eliminar archivo temporal
+        
+        res.json({ ok: true, imported });
+    } catch (e) {
+        console.error('Error importando:', e);
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
+// Endpoint para exportar entrenamiento actual
+app.get('/api/train/export', checkAuth, (req, res) => {
+    const db = getDB();
+    let content = `# RESPUESTAS CONFIGURADAS EN GZMBOT\n`;
+    content += `# Exportado el: ${moment().tz(TZ).format('DD/MM/YYYY HH:mm')}\n`;
+    content += `# Total de respuestas: ${db.training.length}\n\n`;
+    
+    db.training.forEach((t, i) => {
+        if (!t.mediaPath) { // Solo exportar respuestas de texto
+            content += `PREGUNTA: ${t.key}\n`;
+            content += `RESPUESTA: ${t.response.replace(/\n/g, '\\n')}\n`;
+            content += `---\n\n`;
+        }
+    });
+    
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=respuestas_exportadas.txt');
+    res.send(content);
 });
 
 app.post('/api/reminders', checkAuth, (req, res) => {
@@ -406,13 +479,14 @@ app.post('/api/reminders', checkAuth, (req, res) => {
     const { id, name, phone, message, freq, date } = req.body;
     const data = { name, phone: phone.replace(/\D/g, ''), message, freq, date };
     
-    if (id !== "" && id !== null && id !== undefined) {
+    if (id !== "" && id !== null && id !== undefined && id !== "undefined") {
         db.reminders[id] = data;
     } else {
         db.reminders.push(data);
     }
     
     saveDB(db);
+    io.emit('data_update', db);
     res.json({ ok: true });
 });
 
@@ -420,6 +494,7 @@ app.delete('/api/reminders/:id', checkAuth, (req, res) => {
     const db = getDB();
     db.reminders.splice(req.params.id, 1);
     saveDB(db);
+    io.emit('data_update', db);
     res.json({ ok: true });
 });
 
@@ -427,6 +502,7 @@ app.post('/api/exclude', checkAuth, (req, res) => {
     const db = getDB();
     db.excluded.push(req.body);
     saveDB(db);
+    io.emit('data_update', db);
     res.json({ ok: true });
 });
 
@@ -434,6 +510,7 @@ app.delete('/api/exclude/:id', checkAuth, (req, res) => {
     const db = getDB();
     db.excluded.splice(req.params.id, 1);
     saveDB(db);
+    io.emit('data_update', db);
     res.json({ ok: true });
 });
 
@@ -441,6 +518,7 @@ app.delete('/api/learning/:id', checkAuth, (req, res) => {
     const db = getDB();
     db.learning.splice(req.params.id, 1);
     saveDB(db);
+    io.emit('data_update', db);
     res.json({ ok: true });
 });
 
@@ -448,53 +526,50 @@ app.post('/api/config', checkAuth, (req, res) => {
     const freshConfig = getConfig();
     if(req.body.user) freshConfig.adminUser = req.body.user;
     if(req.body.pass) freshConfig.adminPassword = req.body.pass;
-    if(req.body.backupPhone !== undefined) freshConfig.backupPhone = req.body.backupPhone.replace(/\D/g, '');
+    if(req.body.backupPhone !== undefined) freshConfig.backupPhone = req.body.backupPhone;
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(freshConfig, null, 2));
     res.json({ ok: true });
 });
 
 // Endpoint para crear backup manual
-app.post('/api/create-backup', checkAuth, async (req, res) => {
-    const filename = await createBackup();
-    if (filename) {
-        res.json({ ok: true, filename });
+app.post('/api/backup/create', checkAuth, async (req, res) => {
+    const backupFile = await createBackup();
+    if (backupFile) {
+        res.download(backupFile);
     } else {
         res.status(500).json({ ok: false });
     }
 });
 
 // Endpoint para restaurar backup
-app.post('/api/restore-backup', checkAuth, upload.single('backup'), (req, res) => {
+app.post('/api/backup/restore', checkAuth, upload.single('backup'), (req, res) => {
     try {
-        const backupContent = fs.readFileSync(req.file.path, 'utf8');
-        const backupData = JSON.parse(backupContent);
+        const backupContent = JSON.parse(fs.readFileSync(req.file.path, 'utf-8'));
         
-        const db = getDB();
-        db.training = backupData.training || [];
-        db.reminders = backupData.reminders || [];
-        db.excluded = backupData.excluded || [];
-        db.stats = backupData.stats || { replied: 0, total: 0 };
+        // Restaurar base de datos
+        if (backupContent.database) {
+            saveDB(backupContent.database);
+            io.emit('data_update', backupContent.database);
+        }
         
-        saveDB(db);
+        // Restaurar configuración (excepto credenciales actuales)
+        if (backupContent.config) {
+            const currentConfig = getConfig();
+            const newConfig = {
+                ...backupContent.config,
+                adminUser: currentConfig.adminUser, // Mantener usuario actual
+                adminPassword: currentConfig.adminPassword, // Mantener contraseña actual
+                sessionSecret: currentConfig.sessionSecret
+            };
+            fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2));
+        }
+        
         fs.unlinkSync(req.file.path); // Eliminar archivo temporal
-        
         res.json({ ok: true });
     } catch (e) {
+        console.error('Error restaurando backup:', e);
         res.status(500).json({ ok: false, error: e.message });
     }
-});
-
-// Endpoint para listar backups
-app.get('/api/backups', checkAuth, (req, res) => {
-    const files = fs.readdirSync(BACKUP_PATH)
-        .filter(f => f.endsWith('.json'))
-        .map(f => ({
-            name: f,
-            date: fs.statSync(path.join(BACKUP_PATH, f)).mtime
-        }))
-        .sort((a, b) => b.date - a.date);
-    
-    res.json(files);
 });
 
 app.post('/api/logout-wa', checkAuth, async (req, res) => {
@@ -510,15 +585,10 @@ app.post('/api/logout-wa', checkAuth, async (req, res) => {
     }
 });
 
-app.get('/api/config-data', checkAuth, (req, res) => {
-    const freshConfig = getConfig();
-    res.json({ backupPhone: freshConfig.backupPhone || '' });
-});
-
 server.listen(config.port, '0.0.0.0', () => console.log('🚀 GZMBOT ONLINE en puerto', config.port));
 EOF
 
-# 6. UI Principal (views/index.html) - ENHANCED PRO
+# 6. UI Principal (views/index.html) - FIXED
 cat <<'EOF' > views/index.html
 <!DOCTYPE html>
 <html lang="es">
@@ -578,7 +648,7 @@ cat <<'EOF' > views/index.html
                 <div class="flex justify-between items-center mb-8">
                     <h1 class="text-3xl font-extrabold">Actividad Real</h1>
                     <div class="px-4 py-2 glass rounded-full flex items-center gap-2">
-                        <div id="dot" class="w-2 h-2 rounded-full bg-red-500"></div>
+                        <div id="dot" class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
                         <span id="bot-status" class="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Desconectado</span>
                     </div>
                 </div>
@@ -615,35 +685,23 @@ cat <<'EOF' > views/index.html
             </div>
 
             <div id="p-train" class="page">
-                <div class="mb-6 glass p-6 rounded-3xl">
-                    <h3 class="font-bold mb-4 flex items-center gap-2">
-                        <i data-lucide="file-text" class="text-purple-500"></i> Importar/Exportar Respuestas
-                    </h3>
-                    <div class="grid md:grid-cols-2 gap-4">
-                        <div>
-                            <p class="text-sm text-zinc-400 mb-3">Formato del archivo TXT:</p>
-                            <pre class="bg-black/40 p-4 rounded-xl text-xs text-green-400 mb-3">P: hola
-R: ¡Hola! ¿En qué puedo ayudarte?
-
-P: horario
-R: Estamos disponibles de 9am a 6pm</pre>
-                            <input type="file" id="import-file" accept=".txt" class="mb-2">
-                            <button onclick="importTraining()" class="w-full py-3 bg-purple-600 rounded-xl font-bold">
-                                <i data-lucide="upload" class="inline w-4 h-4 mr-2"></i>Importar Archivo
-                            </button>
-                        </div>
-                        <div class="flex items-center justify-center">
-                            <button onclick="exportTraining()" class="py-3 px-6 bg-emerald-600 rounded-xl font-bold">
-                                <i data-lucide="download" class="inline w-4 h-4 mr-2"></i>Descargar Respuestas
-                            </button>
-                        </div>
-                    </div>
+                <div class="mb-6 flex gap-3 flex-wrap">
+                    <button onclick="downloadTemplate()" class="px-4 py-2 bg-purple-600 rounded-xl font-bold flex items-center gap-2 hover:bg-purple-700 transition">
+                        <i data-lucide="download" class="w-4 h-4"></i>Descargar Plantilla
+                    </button>
+                    <button onclick="document.getElementById('import-file').click()" class="px-4 py-2 bg-green-600 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition">
+                        <i data-lucide="upload" class="w-4 h-4"></i>Importar Respuestas
+                    </button>
+                    <button onclick="exportTraining()" class="px-4 py-2 bg-orange-600 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-700 transition">
+                        <i data-lucide="file-text" class="w-4 h-4"></i>Exportar Actuales
+                    </button>
+                    <input type="file" id="import-file" accept=".txt" class="hidden" onchange="importTraining(this)">
                 </div>
 
                 <div class="grid lg:grid-cols-3 gap-8">
                     <div class="lg:col-span-1 glass p-6 rounded-3xl h-fit sticky top-0">
                         <h3 class="font-bold mb-4 flex items-center gap-2"><i data-lucide="plus-circle" class="text-blue-500"></i> Nueva Regla</h3>
-                        <form id="train-form" enctype="multipart/form-data">
+                        <form id="train-form" enctype="multipart/form-data" onsubmit="saveTrain(event)">
                             <input type="hidden" id="t-id">
                             <input type="text" id="t-key" placeholder="Cuando digan..." class="w-full mb-3" required>
                             <textarea id="t-res" placeholder="Responder..." class="w-full h-32 mb-4" required></textarea>
@@ -709,7 +767,7 @@ R: Estamos disponibles de 9am a 6pm</pre>
             </div>
 
             <div id="p-config" class="page">
-                <div class="grid md:grid-cols-2 gap-8">
+                <div class="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
                     <div class="glass p-10 rounded-[3rem]">
                         <h2 class="text-2xl font-bold mb-8">Credenciales de Acceso</h2>
                         <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="w-full mb-4">
@@ -718,33 +776,21 @@ R: Estamos disponibles de 9am a 6pm</pre>
                     </div>
 
                     <div class="glass p-10 rounded-[3rem]">
-                        <h2 class="text-2xl font-bold mb-4 flex items-center gap-2">
-                            <i data-lucide="shield" class="text-amber-500"></i>Copia de Seguridad
-                        </h2>
-                        <p class="text-sm text-zinc-400 mb-6">Los backups se crean automáticamente a las 12:00 AM todos los días.</p>
+                        <h2 class="text-2xl font-bold mb-8">Copias de Seguridad</h2>
+                        <p class="text-sm text-zinc-400 mb-4">Número para recibir backups automáticos (12 AM diario):</p>
+                        <input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="w-full mb-6">
                         
-                        <div class="mb-6">
-                            <label class="block text-sm text-zinc-400 mb-2">Número para recibir backups:</label>
-                            <input type="text" id="backup-phone" placeholder="Ej: 18095551234" class="w-full mb-3">
-                            <button onclick="saveBackupPhone()" class="w-full py-3 bg-amber-600 rounded-xl font-bold mb-4">
-                                <i data-lucide="save" class="inline w-4 h-4 mr-2"></i>Guardar Número
+                        <div class="space-y-3">
+                            <button onclick="createBackup()" class="w-full py-3 bg-green-600 rounded-xl font-bold flex items-center justify-center gap-2">
+                                <i data-lucide="download" class="w-4 h-4"></i>Descargar Backup
                             </button>
-                        </div>
-
-                        <div class="border-t border-zinc-800 pt-6">
-                            <button onclick="createManualBackup()" class="w-full py-3 bg-emerald-600 rounded-xl font-bold mb-3">
-                                <i data-lucide="download-cloud" class="inline w-4 h-4 mr-2"></i>Crear Backup Ahora
+                            <button onclick="document.getElementById('restore-file').click()" class="w-full py-3 bg-orange-600 rounded-xl font-bold flex items-center justify-center gap-2">
+                                <i data-lucide="upload" class="w-4 h-4"></i>Restaurar Backup
                             </button>
-                            
-                            <div class="mb-3">
-                                <input type="file" id="restore-file" accept=".json" class="w-full mb-2">
-                                <button onclick="restoreBackup()" class="w-full py-3 bg-purple-600 rounded-xl font-bold">
-                                    <i data-lucide="upload-cloud" class="inline w-4 h-4 mr-2"></i>Restaurar Backup
-                                </button>
-                            </div>
-
-                            <p class="text-xs text-zinc-500 mt-4">⚠️ Restaurar un backup sobrescribirá todas las configuraciones actuales.</p>
+                            <input type="file" id="restore-file" accept=".json" class="hidden" onchange="restoreBackup(this)">
                         </div>
+                        
+                        <p class="text-xs text-zinc-500 mt-4">💡 Los backups incluyen todas las respuestas, recordatorios y configuraciones.</p>
                     </div>
                 </div>
             </div>
@@ -753,7 +799,7 @@ R: Estamos disponibles de 9am a 6pm</pre>
 
     <script>
         const socket = io();
-        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{} };
+        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{}, backupPhone:'' };
         let currentMediaType = 'text';
 
         function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); }
@@ -777,7 +823,6 @@ R: Estamos disponibles de 9am a 6pm</pre>
                 document.getElementById('t-media').removeAttribute('required');
             } else {
                 document.getElementById('media-upload').classList.remove('hidden');
-                document.getElementById('t-media').setAttribute('required', 'required');
                 document.getElementById('t-media').accept = type === 'image' ? 'image/*' : 'video/*';
             }
             lucide.createIcons();
@@ -801,7 +846,12 @@ R: Estamos disponibles de 9am a 6pm</pre>
 
         socket.on('status_update', s => {
             document.getElementById('bot-status').innerText = s;
-            document.getElementById('dot').className = `w-2 h-2 rounded-full ${s === 'Conectado' ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`;
+            const dot = document.getElementById('dot');
+            if(s === 'Conectado') {
+                dot.className = 'w-2 h-2 rounded-full bg-green-500';
+            } else {
+                dot.className = 'w-2 h-2 rounded-full bg-red-500 animate-pulse';
+            }
         });
 
         socket.on('connection_status', data => {
@@ -821,7 +871,10 @@ R: Estamos disponibles de 9am a 6pm</pre>
             document.getElementById('qr-img').innerHTML = `<img src="${url}" class="w-full">`;
         });
 
-        socket.on('data_update', data => { db = data; render(); });
+        socket.on('data_update', data => { 
+            db = data; 
+            render(); 
+        });
 
         async function load() {
             const res = await fetch('/api/data');
@@ -834,14 +887,18 @@ R: Estamos disponibles de 9am a 6pm</pre>
                 document.getElementById('qr-container').classList.add('hidden');
                 document.getElementById('connected-container').classList.remove('hidden');
                 document.getElementById('btn-logout-wa').classList.remove('hidden');
+                document.getElementById('bot-status').innerText = 'Conectado';
+                document.getElementById('dot').className = 'w-2 h-2 rounded-full bg-green-500';
+            } else {
+                document.getElementById('bot-status').innerText = data.botStatus || 'Desconectado';
+                document.getElementById('dot').className = 'w-2 h-2 rounded-full bg-red-500 animate-pulse';
             }
             
-            // Cargar configuración de backup
-            const configRes = await fetch('/api/config-data');
-            const configData = await configRes.json();
-            document.getElementById('backup-phone').value = configData.backupPhone || '';
+            // Cargar número de backup
+            document.getElementById('conf-backup-phone').value = data.backupPhone || '';
             
             render();
+            lucide.createIcons();
         }
 
         function render() {
@@ -883,7 +940,10 @@ R: Estamos disponibles de 9am a 6pm</pre>
                 <div class="glass p-5 rounded-3xl border-l-4 border-emerald-500">
                     <div class="flex justify-between items-start mb-2">
                         <b class="text-lg">${r.name}</b>
-                        <button onclick="delR(${i})" class="text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        <div class="flex gap-2">
+                            <button onclick="editR(${i})" class="text-zinc-400 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+                            <button onclick="delR(${i})" class="text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
                     </div>
                     <p class="text-sm text-zinc-400 mb-3">${r.message}</p>
                     <span class="text-[10px] font-bold uppercase bg-white/5 px-2 py-1 rounded">${r.freq} | ${r.date}</span>
@@ -898,11 +958,12 @@ R: Estamos disponibles de 9am a 6pm</pre>
             lucide.createIcons();
         }
 
-        document.getElementById('train-form').addEventListener('submit', async function(e) {
+        async function saveTrain(e) {
             e.preventDefault();
             
             const formData = new FormData();
-            formData.append('id', document.getElementById('t-id').value);
+            const id = document.getElementById('t-id').value;
+            formData.append('id', id);
             formData.append('key', document.getElementById('t-key').value);
             formData.append('response', document.getElementById('t-res').value);
             
@@ -923,7 +984,7 @@ R: Estamos disponibles de 9am a 6pm</pre>
             setMediaType('text');
             
             load();
-        });
+        }
 
         function editT(i) {
             const t = db.training[i];
@@ -940,13 +1001,27 @@ R: Estamos disponibles de 9am a 6pm</pre>
             }
         }
 
-        const delT = (i) => fetch('/api/train/'+i, {method:'DELETE'}).then(load);
+        async function delT(i) {
+            if(confirm('¿Eliminar esta respuesta?')) {
+                await fetch('/api/train/'+i, {method:'DELETE'});
+                load();
+            }
+        }
         
         function useL(i) {
             document.getElementById('t-key').value = db.learning[i].text;
-            document.getElementById('n-train').click();
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
+            document.getElementById('p-train').classList.add('active');
+            document.getElementById('n-train').classList.add('active');
+            document.getElementById('t-key').focus();
+            lucide.createIcons();
         }
-        const delL = (i) => fetch('/api/learning/'+i, {method:'DELETE'}).then(load);
+        
+        async function delL(i) {
+            await fetch('/api/learning/'+i, {method:'DELETE'});
+            load();
+        }
 
         async function saveRem() {
             const data = {
@@ -957,96 +1032,130 @@ R: Estamos disponibles de 9am a 6pm</pre>
                 freq: document.getElementById('r-freq').value,
                 date: document.getElementById('r-date').value
             };
+            
             await fetch('/api/reminders', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+            
+            document.getElementById('r-id').value = "";
+            document.getElementById('r-name').value = "";
+            document.getElementById('r-phone').value = "";
+            document.getElementById('r-msg').value = "";
+            document.getElementById('r-date').value = "";
+            
             load();
         }
-        const delR = (i) => fetch('/api/reminders/'+i, {method:'DELETE'}).then(load);
+
+        function editR(i) {
+            const r = db.reminders[i];
+            document.getElementById('r-id').value = i;
+            document.getElementById('r-name').value = r.name;
+            document.getElementById('r-phone').value = r.phone;
+            document.getElementById('r-msg').value = r.message;
+            document.getElementById('r-freq').value = r.freq;
+            document.getElementById('r-date').value = r.date;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function delR(i) {
+            if(confirm('¿Eliminar este recordatorio?')) {
+                await fetch('/api/reminders/'+i, {method:'DELETE'});
+                load();
+            }
+        }
 
         async function saveExcl() {
             const name = document.getElementById('e-name').value;
             const phone = document.getElementById('e-phone').value;
+            
+            if(!name || !phone) {
+                alert('Por favor completa todos los campos');
+                return;
+            }
+            
             await fetch('/api/exclude', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, phone}) });
             document.getElementById('e-name').value = "";
             document.getElementById('e-phone').value = "";
             load();
         }
-        const delE = (i) => fetch('/api/exclude/'+i, {method:'DELETE'}).then(load);
+
+        async function delE(i) {
+            if(confirm('¿Eliminar este exclusión?')) {
+                await fetch('/api/exclude/'+i, {method:'DELETE'});
+                load();
+            }
+        }
 
         async function saveConfig() {
             const user = document.getElementById('conf-user').value;
             const pass = document.getElementById('conf-pass').value;
+            const backupPhone = document.getElementById('conf-backup-phone').value;
+            
+            await fetch('/api/config', { 
+                method:'POST', 
+                headers:{'Content-Type':'application/json'}, 
+                body:JSON.stringify({user, pass, backupPhone}) 
+            });
+            
             if(user || pass) {
-                await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user, pass}) });
                 alert("Credenciales actualizadas. Por favor inicia sesión nuevamente.");
                 location.href = '/login';
             } else {
-                alert("Ingresa al menos un campo para actualizar.");
+                alert("Configuración de backup actualizada.");
             }
         }
 
-        async function saveBackupPhone() {
-            const phone = document.getElementById('backup-phone').value;
-            await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({backupPhone: phone}) });
-            alert("Número de backup guardado correctamente.");
+        async function downloadTemplate() {
+            window.location.href = '/api/train/template';
         }
 
-        async function createManualBackup() {
-            const res = await fetch('/api/create-backup', {method:'POST'});
+        async function importTraining(input) {
+            if(!input.files[0]) return;
+            
+            const formData = new FormData();
+            formData.append('file', input.files[0]);
+            
+            const res = await fetch('/api/train/import', { method:'POST', body: formData });
             const data = await res.json();
+            
             if(data.ok) {
-                alert(`✅ Backup creado: ${data.filename}\nSe enviará al número configurado si está vinculado.`);
+                alert(`✅ Se importaron ${data.imported} respuestas correctamente`);
+                load();
             } else {
-                alert("Error creando backup.");
-            }
-        }
-
-        async function restoreBackup() {
-            const file = document.getElementById('restore-file').files[0];
-            if(!file) {
-                alert("Selecciona un archivo de backup.");
-                return;
+                alert('❌ Error importando archivo: ' + data.error);
             }
             
-            if(confirm("⚠️ ¿Estás seguro? Esto sobrescribirá todas las configuraciones actuales.")) {
-                const formData = new FormData();
-                formData.append('backup', file);
-                
-                const res = await fetch('/api/restore-backup', {method:'POST', body: formData});
-                const data = await res.json();
-                
-                if(data.ok) {
-                    alert("✅ Backup restaurado correctamente.");
-                    location.reload();
-                } else {
-                    alert("❌ Error restaurando backup: " + data.error);
-                }
-            }
+            input.value = '';
         }
 
-        async function importTraining() {
-            const file = document.getElementById('import-file').files[0];
-            if(!file) {
-                alert("Selecciona un archivo TXT.");
+        async function exportTraining() {
+            window.location.href = '/api/train/export';
+        }
+
+        async function createBackup() {
+            window.location.href = '/api/backup/create';
+        }
+
+        async function restoreBackup(input) {
+            if(!input.files[0]) return;
+            
+            if(!confirm('⚠️ ¿Restaurar backup? Esto sobrescribirá todas las configuraciones actuales.')) {
+                input.value = '';
                 return;
             }
             
             const formData = new FormData();
-            formData.append('trainFile', file);
+            formData.append('backup', input.files[0]);
             
-            const res = await fetch('/api/import-training', {method:'POST', body: formData});
+            const res = await fetch('/api/backup/restore', { method:'POST', body: formData });
             const data = await res.json();
             
             if(data.ok) {
-                alert(`✅ ${data.imported} respuestas importadas correctamente.`);
-                document.getElementById('import-file').value = "";
-                load();
+                alert('✅ Backup restaurado correctamente. Recargando...');
+                setTimeout(() => location.reload(), 1000);
             } else {
-                alert("❌ Error importando: " + data.error);
+                alert('❌ Error restaurando backup: ' + data.error);
             }
-        }
-
-        async function exportTraining() {
-            window.location.href = '/api/export-training';
+            
+            input.value = '';
         }
 
         async function logoutWA() {
@@ -1116,17 +1225,18 @@ pm2 startup
 
 IP=$(curl -s ifconfig.me)
 echo "===================================================="
-echo "✨ GZMBOT ENTERPRISE PRO INSTALADO CORRECTAMENTE"
+echo "✨ GZMBOT ENTERPRISE INSTALADO CORRECTAMENTE"
 echo "===================================================="
 echo "🌐 PANEL: http://$IP"
 echo "👤 USUARIO: $ADMIN_USER"
 echo "🔐 PASS: $ADMIN_PASS"
 echo "===================================================="
-echo "📝 MEJORAS IMPLEMENTADAS:"
-echo "   ✅ Dashboard actualizado con estado correcto"
-echo "   ✅ Importar/Exportar respuestas en TXT"
-echo "   ✅ Aprendizaje corregido (botón Configurar)"
-echo "   ✅ Sistema de backups automáticos (12 AM)"
-echo "   ✅ Envío de backups por WhatsApp"
-echo "   ✅ Restauración de backups"
+echo "📝 TODAS LAS FUNCIONES OPERATIVAS:"
+echo "   ✅ Crear/Editar/Eliminar Respuestas"
+echo "   ✅ Crear/Editar/Eliminar Recordatorios"
+echo "   ✅ Agregar/Eliminar Excluidos"
+echo "   ✅ Aprendizaje automático"
+echo "   ✅ Sistema de backup completo"
+echo "   ✅ Importar/Exportar respuestas"
+echo "   ✅ Dashboard con estado correcto"
 echo "===================================================="
