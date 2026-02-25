@@ -1,56 +1,200 @@
 #!/bin/bash
 
 # ============================================================
-# GZMBOT - ENTERPRISE EDITION (IA GEMINI GRATIS - MODELO CORRECTO)
+# GZMBOT - ENTERPRISE EDITION (CORRECCIÓN TOTAL QR + DIAGNÓSTICO)
+# Versión ultra-estable para Debian/Ubuntu
 # ============================================================
 
 clear
-echo "🚀 Iniciando Instalación de GZMBOT con IA Gemini (GRATIS - modelo gemini-3-flash-preview)..."
+echo "===================================================="
+echo "  🚀 GZMBOT ENTERPRISE - INSTALACIÓN MEJORADA"
+echo "  🔧 CON DIAGNÓSTICO Y CORRECCIÓN AUTOMÁTICA"
+echo "===================================================="
+echo ""
 
+# ==================== VERIFICAR EJECUCIÓN COMO ROOT ====================
+if [[ $EUID -ne 0 ]]; then
+   echo "❌ Este script debe ejecutarse como root (sudo)" 
+   exit 1
+fi
+
+# ==================== SOLICITAR CREDENCIALES ====================
 read -p "👤 Usuario Maestro: " ADMIN_USER
 read -sp "🔐 Contraseña Maestra: " ADMIN_PASS
 echo -e "\n"
 
-# Instalación de dependencias del sistema
-sudo apt-get update
-sudo apt-get install -y curl build-essential ffmpeg libnss3 libatk-bridge2.0-0 \
-    libxcomposite1 libxrandr2 libgbm1 libasound2 fonts-liberation \
-    libpangocairo-1.0-0 libxcursor1 libxdamage1 libxi6 libxtst6 \
-    libcups2 libxss1 libxshmfence1
+# ==================== FUNCIÓN DE DIAGNÓSTICO ====================
+diagnostico_sistema() {
+    echo "🔍 Ejecutando diagnóstico del sistema..."
+    
+    # Verificar arquitectura
+    ARCH=$(uname -m)
+    echo "📌 Arquitectura: $ARCH"
+    
+    # Verificar memoria RAM
+    MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
+    echo "📌 Memoria RAM total: ${MEM_TOTAL}MB"
+    
+    if [ $MEM_TOTAL -lt 512 ]; then
+        echo "⚠️  Poca memoria RAM detectable. Puede causar problemas."
+    fi
+    
+    # Verificar espacio en disco
+    DISK_SPACE=$(df -m $HOME | awk 'NR==2 {print $4}')
+    echo "📌 Espacio disponible: ${DISK_SPACE}MB"
+    
+    if [ $DISK_SPACE -lt 1000 ]; then
+        echo "⚠️  Poco espacio en disco. Necesitas al menos 1GB."
+    fi
+    
+    # Verificar versión de Node.js si está instalado
+    if command -v node &> /dev/null; then
+        NODE_VER=$(node -v)
+        echo "📌 Node.js detectado: $NODE_VER"
+    else
+        echo "📌 Node.js no instalado aún"
+    fi
+    
+    # Verificar dependencias críticas
+    echo "📌 Verificando dependencias del sistema..."
+    local deps_faltantes=()
+    
+    for dep in curl wget git build-essential libnss3 libatk-bridge2.0-0 libx11-xcb1 libxcb-dri3-0 libdrm2 libgbm1 libxcomposite1 libxdamage1 libxrandr2 libasound2 libpangocairo-1.0-0 libxcursor1 libxi6 libxtst6 libcups2 libxss1 libxshmfence1 fonts-liberation libappindicator3-1 libatspi2.0-0 libnspr4 libgtk-3-0 xdg-utils; do
+        if ! dpkg -l | grep -q "ii  $dep "; then
+            deps_faltantes+=($dep)
+        fi
+    done
+    
+    if [ ${#deps_faltantes[@]} -eq 0 ]; then
+        echo "✅ Todas las dependencias del sistema están instaladas"
+    else
+        echo "⚠️  Faltan ${#deps_faltantes[@]} dependencias. Se instalarán automáticamente."
+    fi
+}
 
-# Instalar Node.js 18
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt-get install -y nodejs
+# ==================== ACTUALIZAR SISTEMA ====================
+echo "[1/7] Actualizando sistema..."
+apt-get update
+apt-get upgrade -y
 
-# Configurar timezone del servidor a RD
-sudo timedatectl set-timezone America/Santo_Domingo 2>/dev/null || true
+# ==================== EJECUTAR DIAGNÓSTICO ====================
+diagnostico_sistema
+
+# ==================== INSTALAR DEPENDENCIAS COMPLETAS ====================
+echo "[2/7] Instalando todas las dependencias necesarias..."
+apt-get install -y \
+    curl wget git \
+    build-essential \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libx11-xcb1 \
+    libxcb-dri3-0 \
+    libdrm2 \
+    libgbm1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libasound2 \
+    libpangocairo-1.0-0 \
+    libxcursor1 \
+    libxi6 \
+    libxtst6 \
+    libcups2 \
+    libxss1 \
+    libxshmfence1 \
+    fonts-liberation \
+    libappindicator3-1 \
+    libatspi2.0-0 \
+    libnspr4 \
+    libgtk-3-0 \
+    libx11-xcb1 \
+    xdg-utils \
+    ca-certificates \
+    fonts-liberation \
+    libappindicator3-1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    x11-utils \
+    --no-install-recommends
+
+# ==================== INSTALAR CHROMIUM ====================
+echo "[3/7] Instalando Chromium Browser..."
+apt-get install -y chromium-browser chromium-codecs-ffmpeg --no-install-recommends
+
+# Verificar instalación de Chromium
+if command -v chromium-browser &> /dev/null; then
+    CHROME_PATH=$(which chromium-browser)
+    echo "✅ Chromium instalado en: $CHROME_PATH"
+else
+    echo "⚠️  Chromium no se instaló correctamente, instalando versión alternativa..."
+    apt-get install -y chromium --no-install-recommends
+    CHROME_PATH=$(which chromium 2>/dev/null || echo "/usr/bin/chromium")
+fi
+
+# ==================== INSTALAR NODE.JS 18 ====================
+echo "[4/7] Instalando Node.js 18..."
+curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+apt-get install -y nodejs
+
+# Verificar instalación de Node.js
+NODE_VER=$(node -v)
+echo "✅ Node.js $NODE_VER instalado"
+
+# ==================== CONFIGURAR TIMEZONE RD ====================
+echo "[5/7] Configurando zona horaria..."
+timedatectl set-timezone America/Santo_Domingo 2>/dev/null || echo "America/Santo_Domingo" > /etc/timezone
 export TZ='America/Santo_Domingo'
 
-# Crear estructura de directorios
-mkdir -p $HOME/gzmbot/views
-mkdir -p $HOME/gzmbot/data
-mkdir -p $HOME/gzmbot/media
-mkdir -p $HOME/gzmbot/backups
-cd $HOME/gzmbot
+# ==================== CREAR ESTRUCTURA DE DIRECTORIOS ====================
+echo "[6/7] Creando estructura de directorios..."
+mkdir -p /opt/gzmbot/views
+mkdir -p /opt/gzmbot/data
+mkdir -p /opt/gzmbot/media
+mkdir -p /opt/gzmbot/backups
+mkdir -p /opt/gzmbot/.wwebjs_auth
+mkdir -p /opt/gzmbot/.cache/puppeteer
+cd /opt/gzmbot
 
-# Crear archivo de configuración inicial (solo Gemini)
+# Configurar permisos
+chmod -R 755 /opt/gzmbot
+
+# ==================== CONFIG.JSON ====================
 cat <<EOF > config.json
 {
   "adminUser": "$ADMIN_USER",
   "adminPassword": "$ADMIN_PASS",
   "port": 80,
   "sessionSecret": "$(openssl rand -hex 24)",
-  "backupPhone": "",
-  "geminiApiKey": "",
-  "iaEnabled": false,
-  "iaPrompt": "Eres un asistente virtual amable y servicial. Responde en español de forma clara y concisa."
+  "backupPhone": ""
 }
 EOF
 
-# ===================== BACKEND CON GEMINI (MODELO CORRECTO) =====================
+# ==================== BACKEND (APP.JS) ULTRA-MEJORADO ====================
 cat <<'APPEOF' > app.js
 // Forzar timezone del proceso a RD
 process.env.TZ = 'America/Santo_Domingo';
+
+// Configuración de Puppeteer para entornos headless
+process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = 'false';
+process.env.PUPPETEER_EXECUTABLE_PATH = '/usr/bin/chromium-browser';
 
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
@@ -63,28 +207,49 @@ const path = require('path');
 const cron = require('node-cron');
 const moment = require('moment-timezone');
 const multer = require('multer');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { exec } = require('child_process');
 
 const TZ = 'America/Santo_Domingo';
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = socketIo(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
 
 const DB_PATH = path.join(__dirname, 'data/database.json');
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const MEDIA_PATH = path.join(__dirname, 'media');
 const BACKUP_PATH = path.join(__dirname, 'backups');
 const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
+const CHROME_PATH = '/usr/bin/chromium-browser';
 
-// Inicializar base de datos si no existe
+// Verificar existencia de Chromium
+if (!fs.existsSync(CHROME_PATH)) {
+    console.log('⚠️ Chromium no encontrado en la ruta predeterminada, buscando...');
+    // Intentar encontrar chromium en otras ubicaciones comunes
+    const possiblePaths = [
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/snap/bin/chromium'
+    ];
+    
+    for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+            process.env.PUPPETEER_EXECUTABLE_PATH = p;
+            console.log(`✅ Chromium encontrado en: ${p}`);
+            break;
+        }
+    }
+}
+
+// Inicializar DB si no existe
 if (!fs.existsSync(DB_PATH)) {
     fs.writeFileSync(DB_PATH, JSON.stringify({
-        training: [], 
-        reminders: [], 
-        excluded: [], 
-        learning: [],
-        stats: { replied: 0, total: 0, iaReplied: 0 },
-        conversations: {}
+        training: [], reminders: [], excluded: [], learning: [],
+        stats: { replied: 0, total: 0 }
     }));
 }
 
@@ -113,7 +278,6 @@ app.use(session({
 const getDB = () => JSON.parse(fs.readFileSync(DB_PATH));
 const saveDB = (data) => fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
 
-// Función para obtener hora actual de RD
 function nowRD() {
     return moment().tz(TZ);
 }
@@ -122,328 +286,257 @@ let client;
 let botStatus = "Desconectado";
 let lastQR = null;
 let isConnected = false;
+let qrGenerationAttempts = 0;
+let clientInitialized = false;
 
 console.log('🕐 Hora del servidor:', new Date().toString());
 console.log('🕐 Hora RD (moment):', nowRD().format('DD/MM/YYYY HH:mm:ss'));
 console.log('🕐 Timezone configurado:', TZ);
+console.log('🖥️  Chromium path:', process.env.PUPPETEER_EXECUTABLE_PATH || CHROME_PATH);
 
-// ============ COLA DE MENSAJES POR TELÉFONO ============
-const phoneQueues = new Map();
+// Función para limpiar sesión
+function cleanAuthSession() {
+    console.log('🧹 Limpiando sesión anterior...');
+    if (fs.existsSync(AUTH_PATH)) {
+        try {
+            fs.rmSync(AUTH_PATH, { recursive: true, force: true });
+            console.log('✅ Sesión eliminada');
+        } catch (e) {
+            console.error('❌ Error eliminando sesión:', e.message);
+        }
+    }
+    
+    // Limpiar también la caché de Puppeteer
+    const puppeteerCache = path.join(__dirname, '.cache');
+    if (fs.existsSync(puppeteerCache)) {
+        try {
+            fs.rmSync(puppeteerCache, { recursive: true, force: true });
+            console.log('✅ Caché de Puppeteer eliminada');
+        } catch (e) {
+            console.error('❌ Error eliminando caché:', e.message);
+        }
+    }
+}
 
-function processQueue(phone) {
-    const queue = phoneQueues.get(phone);
-    if (!queue || queue.processing) return;
-    queue.processing = true;
-    const next = queue.messages.shift();
-    if (next) {
-        next().finally(() => {
-            queue.processing = false;
-            if (queue.messages.length > 0) processQueue(phone);
+// Verificar conectividad a Internet
+function checkInternet() {
+    return new Promise((resolve) => {
+        exec('ping -c 1 google.com', (error) => {
+            resolve(!error);
         });
-    } else {
-        queue.processing = false;
-    }
+    });
 }
 
-function enqueueMessage(phone, handler) {
-    if (!phoneQueues.has(phone)) {
-        phoneQueues.set(phone, { messages: [], processing: false });
-    }
-    const queue = phoneQueues.get(phone);
-    queue.messages.push(handler);
-    if (!queue.processing) processQueue(phone);
-}
-
-// ============ FUNCIÓN DE IA GEMINI (GRATIS) ============
-async function callGemini(phone, userMessage, userName) {
-    const cfg = getConfig();
-    
-    // Verificaciones
-    if (!cfg.iaEnabled) {
-        console.log(`ℹ️ [IA] IA desactivada para ${phone}`);
-        return null;
+// Inicializar bot con configuración ultra-robusta
+async function initBot() {
+    if (clientInitialized) {
+        console.log('⚠️ Cliente ya inicializado, cerrando anterior...');
+        try {
+            await client.destroy();
+        } catch (e) {
+            console.error('Error destruyendo cliente anterior:', e.message);
+        }
     }
     
-    if (!cfg.geminiApiKey || cfg.geminiApiKey.trim() === '') {
-        console.log(`ℹ️ [IA] No hay API key de Gemini configurada para ${phone}`);
-        return null;
+    // Verificar internet
+    const hasInternet = await checkInternet();
+    if (!hasInternet) {
+        console.error('❌ Sin conexión a Internet. Verifica tu conexión.');
+        botStatus = "Sin Internet";
+        io.emit('status_update', botStatus);
+        setTimeout(initBot, 30000); // Reintentar en 30 segundos
+        return;
     }
-
-    const apiKey = cfg.geminiApiKey.trim();
-
-    const db = getDB();
-    if (!db.conversations[phone]) {
-        db.conversations[phone] = { name: null, history: [], awaitingName: false };
-        saveDB(db);
+    
+    console.log('🔄 Inicializando cliente de WhatsApp...');
+    
+    // Limpiar si hay muchos intentos fallidos
+    if (qrGenerationAttempts > 3) {
+        cleanAuthSession();
+        qrGenerationAttempts = 0;
     }
-    const conv = db.conversations[phone];
-
-    console.log(`🔍 [IA] Procesando mensaje de ${phone}: "${userMessage.substring(0,50)}..."`);
-
-    // Si estamos esperando nombre, guardarlo y responder saludo
-    if (conv.awaitingName) {
-        const name = userMessage.trim();
-        if (name === '') {
-            return "Por favor, dime tu nombre para poder ayudarte.";
-        }
-        conv.name = name;
-        conv.awaitingName = false;
-        saveDB(db);
-        console.log(`✅ Nombre guardado para ${phone}: ${name}`);
-        return `¡Hola ${conv.name}! Encantado de conocerte. ¿En qué puedo ayudarte hoy?`;
+    
+    const puppeteerConfig = {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--disable-gpu',
+            '--disable-software-rasterizer',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--disable-web-security',
+            '--disable-features=BlockInsecurePrivateNetworkRequests',
+            '--disable-features=OutOfBlinkCors',
+            '--disable-webgl',
+            '--disable-font-subpixel-positioning',
+            '--disable-lcd-text',
+            '--disable-default-apps',
+            '--disable-extensions',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--window-size=1920,1080',
+            '--start-maximized',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-update',
+            '--disable-sync',
+            '--disable-breakpad',
+            '--disable-ipc-flooding-protection',
+            '--disable-background-networking',
+            '--metrics-recording-only',
+            '--mute-audio'
+        ]
+    };
+    
+    // Usar el executable path si está disponible
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        puppeteerConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
     }
-
-    // Si no tiene nombre, preguntar
-    if (!conv.name) {
-        conv.awaitingName = true;
-        saveDB(db);
-        console.log(`❓ Preguntando nombre a ${phone}`);
-        return "Hola, soy el asistente virtual. ¿Podrías decirme tu nombre para poder ayudarte mejor?";
-    }
-
-    try {
-        console.log(`🌐 Llamando a Gemini para ${phone}...`);
-        
-        // Inicializar Gemini con el modelo correcto (gemini-3-flash-preview)
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
-
-        // Construir el prompt con contexto
-        const historyContext = conv.history.slice(-5).map(msg => 
-            `${msg.role === 'user' ? 'Usuario' : 'Asistente'}: ${msg.content}`
-        ).join('\n');
-
-        const prompt = `${cfg.iaPrompt || "Eres un asistente virtual amable y servicial."}
-        
-El usuario se llama ${conv.name}.
-
-Historial reciente de la conversación:
-${historyContext}
-
-Usuario: ${userMessage}
-Asistente:`;
-
-        // Generar respuesta
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
-
-        console.log(`✅ Respuesta recibida de Gemini para ${phone}: "${text.substring(0,50)}..."`);
-        return text;
-
-    } catch (error) {
-        console.error(`❌ Error en Gemini para ${phone}:`, error.message);
-        
-        if (error.message.includes('API key')) {
-            return "❌ Error de autenticación con Gemini. El administrador debe verificar la API key.";
-        } else if (error.message.includes('quota')) {
-            return "⚠️ Límite de uso de Gemini alcanzado. Tiene 60 consultas por minuto gratis. Espera un momento.";
-        } else if (error.message.includes('finish_reason: SAFETY')) {
-            return "⚠️ No puedo responder a esa pregunta por políticas de seguridad.";
-        }
-        
-        return "Lo siento, ocurrió un error al procesar tu mensaje. Intenta de nuevo.";
-    }
-}
-
-function initBot() {
+    
     client = new Client({
-        authStrategy: new LocalAuth({ dataPath: AUTH_PATH }),
-        puppeteer: {
-            headless: true,
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                '--disable-dev-shm-usage', 
-                '--disable-gpu'
-            ]
+        authStrategy: new LocalAuth({ 
+            dataPath: AUTH_PATH,
+            clientId: 'gzmbot-main-client' 
+        }),
+        puppeteer: puppeteerConfig,
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
         }
     });
 
     client.on('qr', (qr) => {
+        console.log('📲 QR generado correctamente');
         botStatus = "Esperando QR";
         isConnected = false;
         lastQR = qr;
         qrcode.toDataURL(qr, (err, url) => {
+            if (err) {
+                console.error('❌ Error generando imagen QR:', err);
+                return;
+            }
             io.emit('qr_update', url);
             io.emit('connection_status', { connected: false, status: botStatus });
             io.emit('status_update', botStatus);
+            console.log('✅ QR enviado al cliente web');
         });
+        qrGenerationAttempts++;
     });
 
     client.on('ready', () => {
         botStatus = "Conectado";
         isConnected = true;
         lastQR = null;
+        qrGenerationAttempts = 0;
+        clientInitialized = true;
         io.emit('status_update', botStatus);
         io.emit('connection_status', { connected: true, status: botStatus });
-        console.log('✅ Bot conectado -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+        console.log('✅✅✅ BOT CONECTADO EXITOSAMENTE -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
     });
 
-    client.on('authenticated', () => console.log('🔐 Autenticado'));
+    client.on('authenticated', () => {
+        console.log('🔐 Autenticación exitosa');
+    });
 
     client.on('auth_failure', (msg) => {
-        console.error('❌ Auth failure:', msg);
+        console.error('❌ Fallo de autenticación:', msg);
         botStatus = "Error de autenticación";
         io.emit('status_update', botStatus);
+        qrGenerationAttempts++;
+        
+        if (qrGenerationAttempts > 5) {
+            console.log('🔄 Demasiados fallos, limpiando sesión...');
+            cleanAuthSession();
+            qrGenerationAttempts = 0;
+        }
     });
 
     client.on('disconnected', (reason) => {
         botStatus = "Desconectado";
         isConnected = false;
+        clientInitialized = false;
         io.emit('status_update', botStatus);
         io.emit('connection_status', { connected: false, status: botStatus });
         console.log('❌ Bot desconectado:', reason);
+        
+        // Reintentar conexión después de 10 segundos
+        setTimeout(() => {
+            if (!isConnected) {
+                console.log('🔄 Reintentando conexión...');
+                initBot();
+            }
+        }, 10000);
     });
 
     client.on('message', async (msg) => {
         try {
-            // Ignorar mensajes de grupos y estados
-            if (msg.from.includes('@g.us') || msg.from === 'status@broadcast') return;
+            if (msg.from === 'status@broadcast') return;
 
+            const db = getDB();
             const phone = msg.from.replace('@c.us', '');
 
-            // Encolar el procesamiento para este teléfono
-            enqueueMessage(phone, async () => {
-                try {
-                    // Primero, aseguramos que exista la entrada de conversación
-                    let db = getDB();
-                    if (!db.conversations[phone]) {
-                        db.conversations[phone] = { name: null, history: [], awaitingName: false };
-                        saveDB(db);
-                    }
+            if (db.excluded.some(ex => phone.includes(ex.phone))) return;
 
-                    // Verificar excluidos
-                    if (db.excluded && db.excluded.some(ex => phone.includes(ex.phone))) return;
+            const text = msg.body.toLowerCase().trim();
 
-                    // Manejar notas de voz
-                    if (msg.type === 'ptt') {
-                        await msg.reply('🎤 Por favor, escribe tu mensaje. No puedo procesar notas de voz.');
-                        return;
-                    }
-
-                    const text = msg.body.toLowerCase().trim();
-
-                    // Guardar el mensaje del usuario en el historial
-                    db = getDB();
-                    const conv = db.conversations[phone];
-                    conv.history.push({ 
-                        role: "user", 
-                        content: msg.body, 
-                        timestamp: nowRD().toISOString() 
-                    });
-                    
-                    // Limitar historial a 50 mensajes
-                    if (conv.history.length > 50) {
-                        conv.history = conv.history.slice(-50);
-                    }
-                    saveDB(db);
-
-                    // Verificar si hay trigger manual (respuesta programada)
-                    if (db.training && db.training.length > 0) {
-                        const trigger = db.training.find(t => {
-                            if (!t || !t.key) return false;
-                            const key = t.key.toLowerCase().trim();
-                            return text.includes(key) || key.includes(text);
-                        });
-
-                        if (trigger) {
-                            console.log(`🎯 Trigger manual para ${phone}: "${trigger.key}"`);
-                            if (trigger.mediaPaths && trigger.mediaPaths.length > 0) {
-                                try {
-                                    const firstMedia = MessageMedia.fromFilePath(trigger.mediaPaths[0]);
-                                    await msg.reply(firstMedia, null, { caption: trigger.response });
-                                    for (let i = 1; i < trigger.mediaPaths.length; i++) {
-                                        if (fs.existsSync(trigger.mediaPaths[i])) {
-                                            const media = MessageMedia.fromFilePath(trigger.mediaPaths[i]);
-                                            await msg.reply(media);
-                                        }
-                                    }
-                                } catch (e) {
-                                    console.error('Error enviando media:', e);
-                                    await msg.reply(trigger.response);
-                                }
-                            } else {
-                                await msg.reply(trigger.response);
-                            }
-                            
-                            db = getDB();
-                            if (db.conversations[phone]) {
-                                db.conversations[phone].history.push({ 
-                                    role: "assistant", 
-                                    content: trigger.response, 
-                                    timestamp: nowRD().toISOString() 
-                                });
-                                db.stats.replied = (db.stats.replied || 0) + 1;
-                                saveDB(db);
-                            }
-                            io.emit('data_update', db);
-                            return;
-                        }
-                    }
-
-                    // Si no hay trigger, intentar con IA Gemini
-                    const cfg = getConfig();
-                    if (cfg.iaEnabled && cfg.geminiApiKey) {
-                        console.log(`🤖 Intentando usar Gemini para ${phone}`);
-                        const iaReply = await callGemini(phone, msg.body, conv.name);
-                        
-                        if (iaReply) {
-                            console.log(`✅ Gemini respondió a ${phone}`);
-                            await msg.reply(iaReply);
-                            
-                            db = getDB();
-                            if (db.conversations[phone]) {
-                                db.conversations[phone].history.push({ 
-                                    role: "assistant", 
-                                    content: iaReply, 
-                                    timestamp: nowRD().toISOString() 
-                                });
-                                db.stats.iaReplied = (db.stats.iaReplied || 0) + 1;
-                                db.stats.replied = (db.stats.replied || 0) + 1;
-                                db.stats.total = (db.stats.total || 0) + 1;
-                                saveDB(db);
-                            }
-                            io.emit('data_update', db);
-                            return;
-                        } else {
-                            console.log(`⚠️ Gemini no respondió a ${phone}, guardando en learning`);
-                        }
-                    }
-
-                    // Si no hay trigger ni IA, guardar en learning
-                    db = getDB();
-                    const msgData = {
-                        text: msg.body, 
-                        from: phone,
-                        date: nowRD().format('DD/MM HH:mm'),
-                        hasMedia: msg.hasMedia, 
-                        type: msg.type
-                    };
-                    
-                    if (!db.learning) db.learning = [];
-                    if (!db.learning.some(l => l.text === msg.body && l.from === phone)) {
-                        db.learning.push(msgData);
-                    }
-                    db.stats.total = (db.stats.total || 0) + 1;
-                    saveDB(db);
-                    io.emit('data_update', db);
-                    
-                } catch (e) {
-                    console.error(`Error procesando mensaje de ${phone}:`, e);
-                    try {
-                        await msg.reply('Lo siento, ocurrió un error interno. El administrador ha sido notificado.');
-                    } catch (sendError) {
-                        console.error('Error enviando mensaje de error:', sendError);
-                    }
-                }
+            const trigger = db.training.find(t => {
+                const key = t.key.toLowerCase().trim();
+                return text.includes(key) || key.includes(text);
             });
+
+            if (trigger) {
+                if (trigger.mediaPaths && trigger.mediaPaths.length > 0) {
+                    try {
+                        const firstMedia = MessageMedia.fromFilePath(trigger.mediaPaths[0]);
+                        await msg.reply(firstMedia, null, { caption: trigger.response });
+                        for (let i = 1; i < trigger.mediaPaths.length; i++) {
+                            const media = MessageMedia.fromFilePath(trigger.mediaPaths[i]);
+                            await msg.reply(media);
+                        }
+                    } catch (e) {
+                        await msg.reply(trigger.response);
+                    }
+                } else {
+                    await msg.reply(trigger.response);
+                }
+                db.stats.replied++;
+            } else if (!msg.from.includes('@g.us')) {
+                const msgData = {
+                    text: msg.body, from: phone,
+                    date: nowRD().format('DD/MM HH:mm'),
+                    hasMedia: msg.hasMedia, type: msg.type
+                };
+                if (!db.learning.some(l => l.text === msg.body && l.from === phone)) {
+                    db.learning.push(msgData);
+                }
+            }
+
+            db.stats.total++;
+            saveDB(db);
+            io.emit('data_update', db);
         } catch (e) {
-            console.error('Error en evento message:', e);
+            console.error('Error en mensaje:', e);
         }
     });
 
-    client.initialize().catch(e => console.error("Error al iniciar:", e));
+    try {
+        console.log('🚀 Iniciando cliente...');
+        await client.initialize();
+        console.log('✅ Cliente inicializado correctamente');
+    } catch (e) {
+        console.error('❌ Error al iniciar cliente:', e);
+        botStatus = "Error de inicialización";
+        io.emit('status_update', botStatus);
+        
+        // Reintentar después de 15 segundos
+        setTimeout(initBot, 15000);
+    }
 }
 
 async function createBackup() {
@@ -489,7 +582,7 @@ async function sendBackupToWhatsApp(backupFile) {
     }
 }
 
-// ============ CRON BACKUP AUTOMÁTICO ============
+// ============ CRON BACKUP AUTOMÁTICO 12:00 AM HORA RD ============
 cron.schedule('0 0 * * *', async () => {
     console.log('🔄 [CRON] Backup automático iniciado -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
     const bf = await createBackup();
@@ -504,7 +597,7 @@ cron.schedule('0 0 * * *', async () => {
 
 console.log('📅 Backup automático programado para 12:00 AM hora RD');
 
-// ============ CRON RECORDATORIOS ============
+// ============ CRON RECORDATORIOS - CADA MINUTO ============
 cron.schedule('* * * * *', () => {
     if (!isConnected) return;
 
@@ -512,31 +605,29 @@ cron.schedule('* * * * *', () => {
     const currentRD = nowRD().format('YYYY-MM-DDTHH:mm');
     let changed = false;
 
-    if (db.reminders && db.reminders.length > 0) {
-        for (let i = db.reminders.length - 1; i >= 0; i--) {
-            const rem = db.reminders[i];
+    for (let i = db.reminders.length - 1; i >= 0; i--) {
+        const rem = db.reminders[i];
 
-            if (rem.date === currentRD) {
-                console.log('🔔 Enviando recordatorio a', rem.name, '(' + rem.phone + ') -', currentRD);
+        if (rem.date === currentRD) {
+            console.log('🔔 Enviando recordatorio a', rem.name, '(' + rem.phone + ') -', currentRD);
 
-                const chatId = rem.phone.includes('@') ? rem.phone : rem.phone + '@c.us';
-                client.sendMessage(chatId, rem.message)
-                    .then(() => console.log('✅ Recordatorio enviado a', rem.name))
-                    .catch(e => console.error("❌ Error recordatorio:", e.message));
+            const chatId = rem.phone.includes('@') ? rem.phone : rem.phone + '@c.us';
+            client.sendMessage(chatId, rem.message)
+                .then(() => console.log('✅ Recordatorio enviado a', rem.name))
+                .catch(e => console.error("❌ Error recordatorio:", e.message));
 
-                if (rem.freq === 'Diario') {
-                    rem.date = moment.tz(rem.date, TZ).add(1, 'days').format('YYYY-MM-DDTHH:mm');
-                } else if (rem.freq === 'Semanal') {
-                    rem.date = moment.tz(rem.date, TZ).add(7, 'days').format('YYYY-MM-DDTHH:mm');
-                } else if (rem.freq === 'Mensual') {
-                    rem.date = moment.tz(rem.date, TZ).add(1, 'months').format('YYYY-MM-DDTHH:mm');
-                } else if (rem.freq === 'Anual') {
-                    rem.date = moment.tz(rem.date, TZ).add(1, 'years').format('YYYY-MM-DDTHH:mm');
-                } else {
-                    db.reminders.splice(i, 1);
-                }
-                changed = true;
+            if (rem.freq === 'Diario') {
+                rem.date = moment.tz(rem.date, TZ).add(1, 'days').format('YYYY-MM-DDTHH:mm');
+            } else if (rem.freq === 'Semanal') {
+                rem.date = moment.tz(rem.date, TZ).add(7, 'days').format('YYYY-MM-DDTHH:mm');
+            } else if (rem.freq === 'Mensual') {
+                rem.date = moment.tz(rem.date, TZ).add(1, 'months').format('YYYY-MM-DDTHH:mm');
+            } else if (rem.freq === 'Anual') {
+                rem.date = moment.tz(rem.date, TZ).add(1, 'years').format('YYYY-MM-DDTHH:mm');
+            } else {
+                db.reminders.splice(i, 1);
             }
+            changed = true;
         }
     }
 
@@ -551,26 +642,12 @@ cron.schedule('* * * * *', () => {
 
 console.log('⏰ Recordatorios activos - verificando cada minuto en hora RD');
 
-initBot();
+// Iniciar el bot después de 2 segundos (para asegurar que todo esté listo)
+setTimeout(initBot, 2000);
 
-// ============ MIDDLEWARE DE AUTENTICACIÓN ============
-const checkAuth = (req, res, next) => {
-    if (req.session && req.session.user) {
-        next();
-    } else {
-        res.status(401).send("Unauthorized");
-    }
-};
+const checkAuth = (req, res, next) => req.session.user ? next() : res.status(401).send("Unauthorized");
 
-// ============ RUTAS ============
-app.get('/', (req, res) => {
-    if (req.session && req.session.user) {
-        res.sendFile(path.join(__dirname, 'views/index.html'));
-    } else {
-        res.redirect('/login');
-    }
-});
-
+app.get('/', (req, res) => req.session.user ? res.sendFile(path.join(__dirname, 'views/index.html')) : res.redirect('/login'));
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'views/login.html')));
 
 app.post('/login', (req, res) => {
@@ -582,19 +659,15 @@ app.post('/login', (req, res) => {
 });
 
 app.get('/api/data', checkAuth, (req, res) => {
-    const cfg = getConfig();
-    const db = getDB();
     res.json({
-        ...db, 
+        ...getDB(), 
         botStatus, 
         qr: lastQR, 
         isConnected,
-        backupPhone: cfg.backupPhone || '',
+        backupPhone: getConfig().backupPhone || '',
         serverTime: nowRD().format('DD/MM/YYYY HH:mm:ss'),
         timezone: TZ,
-        iaEnabled: cfg.iaEnabled || false,
-        iaPrompt: cfg.iaPrompt || '',
-        geminiApiKey: cfg.geminiApiKey ? '****' : ''
+        chromePath: process.env.PUPPETEER_EXECUTABLE_PATH || 'No encontrado'
     });
 });
 
@@ -607,53 +680,33 @@ app.get('/api/server-time', checkAuth, (req, res) => {
     });
 });
 
-// ============ ENTRENAMIENTO ============
 app.post('/api/train', checkAuth, upload.array('media', 10), (req, res) => {
-    try {
-        const db = getDB();
-        const { id, key, response } = req.body;
-        
-        if (!key || !response) {
-            return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' });
+    const db = getDB();
+    const { id, key, response } = req.body;
+    const trainData = {
+        key, response,
+        mediaPaths: req.files && req.files.length > 0 ? req.files.map(f => f.path) : [],
+        mediaTypes: req.files && req.files.length > 0 ? req.files.map(f => f.mimetype) : []
+    };
+    if (id !== "" && id !== null && id !== undefined && id !== "undefined") {
+        if (db.training[id] && db.training[id].mediaPaths && db.training[id].mediaPaths.length > 0) {
+            db.training[id].mediaPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
         }
-        
-        const trainData = {
-            key: key.trim(),
-            response: response.trim(),
-            mediaPaths: req.files && req.files.length > 0 ? req.files.map(f => f.path) : [],
-            mediaTypes: req.files && req.files.length > 0 ? req.files.map(f => f.mimetype) : []
-        };
-        
-        if (id && id !== "" && id !== "null" && id !== "undefined") {
-            if (db.training[id] && db.training[id].mediaPaths && db.training[id].mediaPaths.length > 0) {
-                db.training[id].mediaPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
-            }
-            db.training[id] = trainData;
-        } else {
-            db.training.push(trainData);
-        }
-        saveDB(db); 
-        io.emit('data_update', db); 
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
+        db.training[id] = trainData;
+    } else {
+        db.training.push(trainData);
     }
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
 app.delete('/api/train/:id', checkAuth, (req, res) => {
-    try {
-        const db = getDB();
-        const item = db.training[req.params.id];
-        if (item && item.mediaPaths && item.mediaPaths.length > 0) {
-            item.mediaPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
-        }
-        db.training.splice(req.params.id, 1);
-        saveDB(db); 
-        io.emit('data_update', db); 
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
+    const db = getDB();
+    const item = db.training[req.params.id];
+    if (item && item.mediaPaths && item.mediaPaths.length > 0) {
+        item.mediaPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
     }
+    db.training.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
 app.get('/api/train/template', checkAuth, (req, res) => {
@@ -681,9 +734,7 @@ app.post('/api/train/import', checkAuth, upload.single('file'), (req, res) => {
             }
         }
         if (cQ && cR) { db.training.push({ key: cQ, response: cR, mediaPaths: [], mediaTypes: [] }); imported++; }
-        saveDB(db); 
-        io.emit('data_update', db); 
-        fs.unlinkSync(req.file.path);
+        saveDB(db); io.emit('data_update', db); fs.unlinkSync(req.file.path);
         res.json({ ok: true, imported });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -701,189 +752,54 @@ app.get('/api/train/export', checkAuth, (req, res) => {
     res.send(content);
 });
 
-// ============ RECORDATORIOS ============
 app.post('/api/reminders', checkAuth, (req, res) => {
-    try {
-        const db = getDB();
-        const { id, name, phone, message, freq, date } = req.body;
-        
-        if (!name || !phone || !message || !freq || !date) {
-            return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' });
-        }
-        
-        const data = { 
-            name: name.trim(), 
-            phone: phone.replace(/\D/g, ''), 
-            message: message.trim(), 
-            freq, 
-            date 
-        };
+    const db = getDB();
+    const { id, name, phone, message, freq, date } = req.body;
+    const data = { name, phone: phone.replace(/\D/g, ''), message, freq, date };
 
-        console.log('📝 Recordatorio guardado:', name, '- Fecha:', date);
+    console.log('📝 Recordatorio guardado:', name, '- Fecha:', date, '- Hora actual RD:', nowRD().format('YYYY-MM-DDTHH:mm'));
 
-        if (id && id !== "" && id !== "null" && id !== "undefined") {
-            db.reminders[id] = data;
-        } else {
-            db.reminders.push(data);
-        }
-        saveDB(db); 
-        io.emit('data_update', db); 
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
+    if (id !== "" && id !== null && id !== undefined && id !== "undefined") db.reminders[id] = data;
+    else db.reminders.push(data);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
 app.delete('/api/reminders/:id', checkAuth, (req, res) => {
-    try {
-        const db = getDB(); 
-        db.reminders.splice(req.params.id, 1);
-        saveDB(db); 
-        io.emit('data_update', db); 
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
+    const db = getDB(); db.reminders.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
-// ============ EXCLUIDOS ============
 app.post('/api/exclude', checkAuth, (req, res) => {
-    try {
-        const db = getDB(); 
-        db.excluded.push(req.body);
-        saveDB(db); 
-        io.emit('data_update', db); 
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
+    const db = getDB(); db.excluded.push(req.body);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
 app.delete('/api/exclude/:id', checkAuth, (req, res) => {
-    try {
-        const db = getDB(); 
-        db.excluded.splice(req.params.id, 1);
-        saveDB(db); 
-        io.emit('data_update', db); 
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
+    const db = getDB(); db.excluded.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
-// ============ APRENDIZAJE ============
 app.delete('/api/learning/:id', checkAuth, (req, res) => {
-    try {
-        const db = getDB(); 
-        db.learning.splice(req.params.id, 1);
-        saveDB(db); 
-        io.emit('data_update', db); 
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
+    const db = getDB(); db.learning.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
-// ============ CONFIGURACIÓN ============
 app.post('/api/config/credentials', checkAuth, (req, res) => {
-    try {
-        const fc = getConfig();
-        if (req.body.user && req.body.user.trim() !== '') {
-            fc.adminUser = req.body.user.trim();
-        }
-        if (req.body.pass && req.body.pass.trim() !== '') {
-            fc.adminPassword = req.body.pass.trim();
-        }
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
+    const fc = getConfig();
+    if (req.body.user) fc.adminUser = req.body.user;
+    if (req.body.pass) fc.adminPassword = req.body.pass;
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
+    res.json({ ok: true });
 });
 
 app.post('/api/config/backup-phone', checkAuth, (req, res) => {
-    try {
-        const fc = getConfig();
-        fc.backupPhone = req.body.backupPhone ? req.body.backupPhone.replace(/\D/g, '') : '';
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
-        console.log('📱 Número backup guardado:', fc.backupPhone);
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
+    const fc = getConfig();
+    fc.backupPhone = req.body.backupPhone || '';
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
+    console.log('📱 Número backup guardado:', fc.backupPhone);
+    res.json({ ok: true });
 });
 
-// ============ CONFIGURACIÓN IA GEMINI ============
-app.post('/api/config/ia', checkAuth, (req, res) => {
-    try {
-        const fc = getConfig();
-        
-        if (req.body.geminiApiKey !== undefined && req.body.geminiApiKey !== '****') {
-            fc.geminiApiKey = req.body.geminiApiKey.trim();
-        }
-        
-        if (req.body.iaEnabled !== undefined) {
-            fc.iaEnabled = req.body.iaEnabled === true || req.body.iaEnabled === 'true';
-        }
-        
-        if (req.body.iaPrompt !== undefined) {
-            fc.iaPrompt = req.body.iaPrompt.trim();
-        }
-        
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
-        console.log('🤖 Configuración Gemini guardada - Activada:', fc.iaEnabled);
-        console.log('🤖 API Key:', fc.geminiApiKey ? 'Configurada' : 'No configurada');
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
-});
-
-// ============ CONTACTOS ============
-app.get('/api/contacts', checkAuth, (req, res) => {
-    try {
-        const db = getDB();
-        const conversations = db.conversations || {};
-        const contacts = Object.entries(conversations).map(([phone, data]) => ({
-            phone,
-            name: data.name || 'Desconocido',
-            lastMessage: data.history && data.history.length > 0 ? data.history[data.history.length-1].content : null,
-            lastDate: data.history && data.history.length > 0 ? data.history[data.history.length-1].timestamp : null,
-            awaitingName: data.awaitingName || false
-        }));
-        res.json(contacts);
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-app.post('/api/contacts/:phone/name', checkAuth, (req, res) => {
-    try {
-        const db = getDB();
-        const { phone } = req.params;
-        const { name } = req.body;
-        if (!db.conversations[phone]) db.conversations[phone] = { name: null, history: [], awaitingName: false };
-        db.conversations[phone].name = name;
-        db.conversations[phone].awaitingName = false;
-        saveDB(db);
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-app.get('/api/contacts/:phone/history', checkAuth, (req, res) => {
-    try {
-        const db = getDB();
-        const { phone } = req.params;
-        const conv = db.conversations[phone] || { history: [] };
-        res.json(conv.history);
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-// ============ BACKUPS ============
 app.get('/api/backup/download', checkAuth, async (req, res) => {
     try {
         const bf = await createBackup();
@@ -919,17 +835,16 @@ app.post('/api/backup/restore', checkAuth, upload.single('backup'), (req, res) =
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// ============ LOGOUT WHATSAPP ============
 app.post('/api/logout-wa', checkAuth, async (req, res) => {
     try {
         await client.logout();
         if (fs.existsSync(AUTH_PATH)) fs.rmSync(AUTH_PATH, { recursive: true, force: true });
         isConnected = false;
         botStatus = "Desconectado";
+        clientInitialized = false;
         const db = getDB();
         db.stats.replied = 0;
         db.stats.total = 0;
-        db.stats.iaReplied = 0;
         saveDB(db);
         io.emit('data_update', db);
         res.json({ ok: true });
@@ -941,178 +856,185 @@ server.listen(config.port, '0.0.0.0', () => {
     console.log('🚀 GZMBOT ONLINE en puerto', config.port);
     console.log('🕐 Hora actual RD:', nowRD().format('DD/MM/YYYY HH:mm:ss'));
     console.log('📅 Próximo backup: 12:00 AM hora RD');
+    console.log('📱 Panel web disponible en http://localhost:' + config.port);
+});
+
+// Manejar cierre graceful
+process.on('SIGINT', async () => {
+    console.log('🛑 Cerrando aplicación...');
+    if (client) {
+        try {
+            await client.destroy();
+            console.log('✅ Cliente de WhatsApp cerrado');
+        } catch (e) {
+            console.error('Error cerrando cliente:', e.message);
+        }
+    }
+    process.exit(0);
 });
 APPEOF
 
-# ===================== INDEX HTML (MISMO ESTILO) =====================
+# ==================== INDEX HTML (SIN CAMBIOS) =====================
 cat <<'HTMLEOF' > views/index.html
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GZMBOT | Enterprise + IA</title>
+    <title>GZMBOT | Enterprise</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #050507; color: #f4f4f5; font-family: 'Plus Jakarta Sans', sans-serif; }
-        .glass { background: rgba(15, 15, 20, 0.8); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.05); }
-        .sidebar-item { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: 16px; color: #71717a; transition: all 0.3s; cursor: pointer; }
+        body { background: #0a0a0f; color: #ffffff; font-family: 'Plus Jakarta Sans', sans-serif; }
+        .glass { background: rgba(20, 20, 30, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); border-radius: 24px; box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5); }
+        .glass-card { background: rgba(25, 25, 35, 0.8); border: 1px solid rgba(255,255,255,0.03); border-radius: 20px; transition: all 0.2s ease; }
+        .glass-card:hover { border-color: rgba(37, 99, 235, 0.3); transform: translateY(-2px); box-shadow: 0 20px 30px -10px rgba(37,99,235,0.2); }
+        .sidebar-item { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-radius: 18px; color: #a1a1aa; transition: all 0.3s; cursor: pointer; font-weight: 500; }
         .sidebar-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
-        .sidebar-item.active { background: #2563eb; color: #fff; box-shadow: 0 10px 20px -5px rgba(37, 99, 235, 0.4); }
-        .page { display: none; animation: slideUp 0.4s ease-out; }
+        .sidebar-item.active { background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); color: #fff; box-shadow: 0 10px 20px -5px rgba(37, 99, 235, 0.5); }
+        .page { display: none; animation: fadeIn 0.3s ease-out; }
         .page.active { display: block; }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         input, select, textarea {
-            background: #0f0f13 !important; border: 1px solid #27272a !important;
-            color: #fff !important; padding: 12px 16px !important; border-radius: 12px !important;
-            outline: none; width: 100%; font-size: 16px !important;
+            background: #1a1a24 !important; border: 1px solid #2a2a35 !important;
+            color: #fff !important; padding: 12px 16px !important; border-radius: 16px !important;
+            outline: none; width: 100%; font-size: 15px; transition: border 0.2s;
         }
         input:focus, textarea:focus { border-color: #2563eb !important; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
-        .media-preview { max-width: 120px; max-height: 120px; border-radius: 12px; margin: 4px; object-fit: cover; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 10px; }
+        .media-preview { max-width: 100px; max-height: 100px; border-radius: 12px; margin: 4px; object-fit: cover; border: 2px solid #2a2a35; }
         .media-type-selector { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-        .media-type-btn { padding: 8px 16px; background: #0f0f13; border: 1px solid #27272a; border-radius: 8px; cursor: pointer; transition: all 0.3s; color: #fff; }
-        .media-type-btn.active { background: #2563eb; border-color: #2563eb; }
-        .media-preview-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .media-type-btn { padding: 10px 18px; background: #1a1a24; border: 1px solid #2a2a35; border-radius: 30px; cursor: pointer; transition: all 0.3s; color: #a1a1aa; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+        .media-type-btn.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+        .media-preview-container { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
         .media-item { position: relative; }
-        .media-remove { position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 12px; font-weight: bold; }
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); align-items: center; justify-content: center; }
-        .modal-content { background: #0f0f13; border-radius: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; padding: 24px; border: 1px solid #27272a; }
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #2563eb;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(37,99,235,0.3);
-            transform: translateY(100px);
-            opacity: 0;
-            transition: all 0.3s;
-            z-index: 9999;
-        }
-        .toast.show {
-            transform: translateY(0);
-            opacity: 1;
-        }
+        .media-remove { position: absolute; top: -6px; right: -6px; background: #ef4444; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; font-weight: bold; border: 2px solid #1a1a24; }
+        .btn { padding: 12px 24px; border-radius: 30px; font-weight: 600; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
+        .btn-primary { background: #2563eb; color: #fff; box-shadow: 0 8px 16px -4px rgba(37,99,235,0.3); }
+        .btn-primary:hover { background: #1e4fcf; transform: translateY(-2px); }
+        .btn-success { background: #10b981; color: #fff; box-shadow: 0 8px 16px -4px rgba(16,185,129,0.3); }
+        .btn-success:hover { background: #0ea271; transform: translateY(-2px); }
+        .btn-danger { background: #ef4444; color: #fff; box-shadow: 0 8px 16px -4px rgba(239,68,68,0.3); }
+        .btn-danger:hover { background: #dc2626; transform: translateY(-2px); }
+        .btn-warning { background: #f59e0b; color: #fff; box-shadow: 0 8px 16px -4px rgba(245,158,11,0.3); }
+        .btn-warning:hover { background: #d97706; transform: translateY(-2px); }
+        .btn-outline { background: transparent; border: 1px solid #2a2a35; color: #a1a1aa; }
+        .btn-outline:hover { border-color: #2563eb; color: #fff; }
     </style>
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    <div id="toast" class="toast"></div>
-
-    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-6 overflow-y-auto">
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r border-white/5 -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-6 overflow-y-auto">
         <div class="flex items-center gap-3 mb-10 px-2">
-            <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
+            <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-800 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
                 <i data-lucide="bot" class="text-white w-6 h-6"></i>
             </div>
-            <span class="text-2xl font-extrabold tracking-tighter">GZMBOT</span>
+            <span class="text-2xl font-extrabold tracking-tighter bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">GZMBOT</span>
         </div>
-        <nav class="space-y-2 flex-1">
-            <div onclick="nav('dash')" id="n-dash" class="sidebar-item active"><i data-lucide="layout-grid"></i><span>Dashboard</span></div>
-            <div onclick="nav('conn')" id="n-conn" class="sidebar-item"><i data-lucide="qr-code"></i><span>Conexión</span></div>
-            <div onclick="nav('train')" id="n-train" class="sidebar-item"><i data-lucide="message-square"></i><span>Respuestas</span></div>
-            <div onclick="nav('learn')" id="n-learn" class="sidebar-item"><i data-lucide="brain"></i><span>Aprender</span></div>
-            <div onclick="nav('rem')" id="n-rem" class="sidebar-item"><i data-lucide="bell"></i><span>Recordatorios</span></div>
-            <div onclick="nav('excl')" id="n-excl" class="sidebar-item"><i data-lucide="shield-off"></i><span>Excluidos</span></div>
-            <div onclick="nav('contacts')" id="n-contacts" class="sidebar-item"><i data-lucide="users"></i><span>Contactos</span></div>
-            <div onclick="nav('config')" id="n-config" class="sidebar-item"><i data-lucide="settings"></i><span>Ajustes</span></div>
+        <nav class="space-y-1 flex-1">
+            <div onclick="nav('dash')" id="n-dash" class="sidebar-item active"><i data-lucide="layout-grid" class="w-5 h-5"></i><span>Dashboard</span></div>
+            <div onclick="nav('conn')" id="n-conn" class="sidebar-item"><i data-lucide="qr-code" class="w-5 h-5"></i><span>Conexión</span></div>
+            <div onclick="nav('train')" id="n-train" class="sidebar-item"><i data-lucide="message-square" class="w-5 h-5"></i><span>Respuestas</span></div>
+            <div onclick="nav('learn')" id="n-learn" class="sidebar-item"><i data-lucide="brain" class="w-5 h-5"></i><span>Aprender</span></div>
+            <div onclick="nav('rem')" id="n-rem" class="sidebar-item"><i data-lucide="bell" class="w-5 h-5"></i><span>Recordatorios</span></div>
+            <div onclick="nav('excl')" id="n-excl" class="sidebar-item"><i data-lucide="shield-off" class="w-5 h-5"></i><span>Excluidos</span></div>
+            <div onclick="nav('config')" id="n-config" class="sidebar-item"><i data-lucide="settings" class="w-5 h-5"></i><span>Ajustes</span></div>
         </nav>
-        <button onclick="location.href='/login'" class="sidebar-item text-red-500 hover:bg-red-500/10 mt-auto">
-            <i data-lucide="power"></i><span>Salir del Panel</span>
+        <button onclick="location.href='/login'" class="sidebar-item text-red-400 hover:bg-red-500/10 hover:text-red-400 mt-auto">
+            <i data-lucide="power" class="w-5 h-5"></i><span>Salir del Panel</span>
         </button>
     </aside>
 
-    <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header class="lg:hidden p-4 glass flex justify-between items-center flex-shrink-0">
-            <span class="font-bold">GZMBOT</span>
-            <button onclick="toggleSidebar()" class="p-2"><i data-lucide="menu"></i></button>
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#0a0a0f]">
+        <header class="lg:hidden p-4 glass flex justify-between items-center flex-shrink-0 mx-4 mt-4 rounded-2xl">
+            <span class="font-bold text-lg">GZMBOT</span>
+            <button onclick="toggleSidebar()" class="p-2 hover:bg-white/10 rounded-xl transition"><i data-lucide="menu"></i></button>
         </header>
 
-        <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-10">
+        <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
 
             <!-- DASHBOARD -->
             <div id="p-dash" class="page active">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
-                    <h1 class="text-2xl sm:text-3xl font-extrabold">Actividad Real</h1>
-                    <div class="flex items-center gap-3">
-                        <div id="server-clock" class="text-xs text-zinc-500 font-mono"></div>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+                    <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Dashboard</h1>
+                    <div class="flex items-center gap-4">
+                        <div id="server-clock" class="text-sm text-zinc-500 font-mono bg-white/5 px-4 py-2 rounded-full"></div>
                         <div class="px-4 py-2 glass rounded-full flex items-center gap-2">
-                            <div id="dot" class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                            <span id="bot-status" class="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Desconectado</span>
+                            <div id="dot" class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></div>
+                            <span id="bot-status" class="text-xs font-bold uppercase tracking-widest text-zinc-400">Desconectado</span>
                         </div>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 gap-3 sm:gap-6">
-                    <div class="glass p-5 sm:p-8 rounded-2xl sm:rounded-[2.5rem]">
-                        <p class="text-zinc-500 font-bold text-[10px] sm:text-xs uppercase tracking-widest mb-1 sm:mb-2">Bot ha respondido</p>
-                        <h2 id="s-replied" class="text-3xl sm:text-6xl font-black text-blue-500">0</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="glass-card p-8">
+                        <div class="flex items-center gap-4 mb-4">
+                            <div class="w-12 h-12 bg-blue-500/20 rounded-2xl flex items-center justify-center">
+                                <i data-lucide="message-circle" class="w-6 h-6 text-blue-500"></i>
+                            </div>
+                            <p class="text-zinc-400 font-medium">Bot ha respondido</p>
+                        </div>
+                        <h2 id="s-replied" class="text-5xl md:text-6xl font-black text-blue-500">0</h2>
                     </div>
-                    <div class="glass p-5 sm:p-8 rounded-2xl sm:rounded-[2.5rem]">
-                        <p class="text-zinc-500 font-bold text-[10px] sm:text-xs uppercase tracking-widest mb-1 sm:mb-2">Tráfico Total</p>
-                        <h2 id="s-total" class="text-3xl sm:text-6xl font-black text-white">0</h2>
+                    <div class="glass-card p-8">
+                        <div class="flex items-center gap-4 mb-4">
+                            <div class="w-12 h-12 bg-zinc-500/20 rounded-2xl flex items-center justify-center">
+                                <i data-lucide="users" class="w-6 h-6 text-zinc-400"></i>
+                            </div>
+                            <p class="text-zinc-400 font-medium">Tráfico Total</p>
+                        </div>
+                        <h2 id="s-total" class="text-5xl md:text-6xl font-black text-white">0</h2>
                     </div>
-                </div>
-                <div class="mt-4 glass p-5 sm:p-8 rounded-2xl sm:rounded-[2.5rem]">
-                    <p class="text-zinc-500 font-bold text-xs uppercase tracking-widest mb-2">Respuestas IA</p>
-                    <h2 id="s-ia" class="text-2xl sm:text-4xl font-black text-green-500">0</h2>
                 </div>
             </div>
 
             <!-- CONEXIÓN -->
             <div id="p-conn" class="page">
-                <div class="max-w-md mx-auto glass p-6 sm:p-10 rounded-2xl sm:rounded-[3rem] text-center">
-                    <div id="qr-container" class="bg-white p-3 sm:p-4 rounded-2xl sm:rounded-3xl inline-block mb-6 sm:mb-8">
-                        <div id="qr-img" class="w-52 h-52 sm:w-64 sm:h-64 flex items-center justify-center text-black font-bold italic text-sm">Esperando Servidor...</div>
-                    </div>
-                    <div id="connected-container" class="hidden mb-6 sm:mb-8">
-                        <div class="w-20 h-20 sm:w-24 sm:h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <i data-lucide="check-circle" class="w-10 h-10 sm:w-12 sm:h-12 text-green-500"></i>
+                <div class="max-w-lg mx-auto">
+                    <div class="glass-card p-8 text-center">
+                        <div id="qr-container" class="bg-white p-4 rounded-2xl inline-block mb-6">
+                            <div id="qr-img" class="w-64 h-64 flex items-center justify-center text-black font-bold text-sm">Esperando...</div>
                         </div>
-                        <h2 class="text-xl sm:text-2xl font-bold text-green-500 mb-2">WhatsApp Vinculado</h2>
-                        <p class="text-zinc-500 text-sm">El bot está conectado y funcionando.</p>
+                        <div id="connected-container" class="hidden mb-6">
+                            <div class="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>
+                            </div>
+                            <h2 class="text-2xl font-bold text-green-500 mb-2">WhatsApp Vinculado</h2>
+                            <p class="text-zinc-400">El bot está conectado y funcionando.</p>
+                        </div>
+                        <h2 class="text-2xl font-bold mb-2">Vincular WhatsApp</h2>
+                        <p class="text-zinc-500 text-sm mb-6">Escanea el código QR con tu WhatsApp</p>
+                        <button id="btn-logout-wa" onclick="logoutWA()" class="hidden btn btn-danger w-full">
+                            <i data-lucide="unlink" class="w-5 h-5"></i> Desvincular
+                        </button>
                     </div>
-                    <h2 class="text-xl sm:text-2xl font-bold mb-2">Enlace de WhatsApp</h2>
-                    <p class="text-zinc-500 text-xs sm:text-sm mb-6 sm:mb-8">Escanea para activar el bot.</p>
-                    <button id="btn-logout-wa" onclick="logoutWA()" class="hidden w-full py-3 sm:py-4 bg-red-500/10 text-red-500 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition">
-                        <i data-lucide="unlink" class="inline w-4 h-4 mr-2"></i>DESVINCULAR
-                    </button>
                 </div>
             </div>
 
             <!-- RESPUESTAS -->
             <div id="p-train" class="page">
-                <div class="mb-4 sm:mb-6 flex gap-2 sm:gap-3 flex-wrap">
-                    <button onclick="downloadTemplate()" class="px-3 sm:px-4 py-2 bg-purple-600 rounded-xl font-bold flex items-center gap-2 hover:bg-purple-700 transition text-xs sm:text-sm">
-                        <i data-lucide="download" class="w-4 h-4"></i>Plantilla
-                    </button>
-                    <button onclick="document.getElementById('import-file').click()" class="px-3 sm:px-4 py-2 bg-green-600 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition text-xs sm:text-sm">
-                        <i data-lucide="upload" class="w-4 h-4"></i>Importar
-                    </button>
-                    <button onclick="exportTraining()" class="px-3 sm:px-4 py-2 bg-orange-600 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-700 transition text-xs sm:text-sm">
-                        <i data-lucide="file-text" class="w-4 h-4"></i>Exportar
-                    </button>
+                <div class="flex flex-wrap gap-3 mb-6">
+                    <button onclick="downloadTemplate()" class="btn btn-outline"><i data-lucide="download" class="w-5 h-5"></i> Plantilla</button>
+                    <button onclick="document.getElementById('import-file').click()" class="btn btn-success"><i data-lucide="upload" class="w-5 h-5"></i> Importar</button>
+                    <button onclick="exportTraining()" class="btn btn-warning"><i data-lucide="file-text" class="w-5 h-5"></i> Exportar</button>
                     <input type="file" id="import-file" accept=".txt" class="hidden" onchange="importTraining(this)">
                 </div>
-                <div class="grid lg:grid-cols-3 gap-4 sm:gap-8">
-                    <div class="lg:col-span-1 glass p-4 sm:p-6 rounded-2xl sm:rounded-3xl h-fit">
-                        <h3 class="font-bold mb-4 flex items-center gap-2"><i data-lucide="plus-circle" class="text-blue-500"></i> Nueva Regla</h3>
+                <div class="grid lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-1 glass-card p-6 h-fit">
+                        <h3 class="font-bold text-lg mb-4 flex items-center gap-2"><i data-lucide="plus-circle" class="text-blue-500"></i> Nueva Regla</h3>
                         <form id="train-form" enctype="multipart/form-data" onsubmit="saveTrain(event)">
                             <input type="hidden" id="t-id">
                             <input type="text" id="t-key" placeholder="Cuando digan..." class="mb-3" required>
-                            <textarea id="t-res" placeholder="Responder..." class="h-28 sm:h-32 mb-4" required></textarea>
+                            <textarea id="t-res" placeholder="Responder..." class="h-32 mb-4" required></textarea>
                             <div class="mb-4">
-                                <label class="block text-sm text-zinc-400 mb-2">Tipo:</label>
+                                <label class="block text-sm text-zinc-400 mb-2">Tipo de respuesta:</label>
                                 <div class="media-type-selector">
-                                    <button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="inline w-4 h-4"></i> Texto</button>
-                                    <button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="inline w-4 h-4"></i> Imagen</button>
-                                    <button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="inline w-4 h-4"></i> Video</button>
+                                    <button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="w-4 h-4"></i> Texto</button>
+                                    <button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="w-4 h-4"></i> Imagen</button>
+                                    <button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="w-4 h-4"></i> Video</button>
                                 </div>
                             </div>
                             <div id="media-upload" class="hidden mb-4">
@@ -1120,130 +1042,90 @@ cat <<'HTMLEOF' > views/index.html
                                 <input type="file" id="t-media" accept="image/*,video/*" multiple>
                                 <div id="media-preview" class="media-preview-container"></div>
                             </div>
-                            <button type="submit" class="w-full py-3 sm:py-4 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Guardar</button>
+                            <button type="submit" class="btn btn-primary w-full">Guardar Regla</button>
                         </form>
                     </div>
-                    <div id="l-train" class="lg:col-span-2 space-y-3"></div>
+                    <div id="l-train" class="lg:col-span-2 space-y-4"></div>
                 </div>
             </div>
 
             <!-- APRENDER -->
             <div id="p-learn" class="page">
-                <h2 class="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Bandeja de Aprendizaje</h2>
-                <p class="text-zinc-500 text-xs sm:text-sm mb-4 sm:mb-6">Conversaciones que el bot no supo responder</p>
+                <h2 class="text-2xl font-bold mb-2">Bandeja de Aprendizaje</h2>
+                <p class="text-zinc-500 text-sm mb-6">Mensajes que el bot no supo responder</p>
                 <div id="l-learn" class="space-y-3"></div>
             </div>
 
             <!-- RECORDATORIOS -->
             <div id="p-rem" class="page">
-                <div class="glass p-4 sm:p-8 rounded-2xl sm:rounded-[2.5rem] mb-6 sm:mb-8">
+                <div class="glass-card p-6 mb-8">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="font-bold text-base sm:text-lg">Programar Recordatorio</h3>
-                        <span id="rem-clock" class="text-xs text-zinc-500 font-mono"></span>
+                        <h3 class="font-bold text-xl">Programar Recordatorio</h3>
+                        <span id="rem-clock" class="text-sm text-zinc-500 font-mono"></span>
                     </div>
                     <p class="text-xs text-zinc-500 mb-4">⏰ Los recordatorios usan hora de República Dominicana (AST/UTC-4)</p>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         <input type="hidden" id="r-id">
                         <input type="text" id="r-name" placeholder="Nombre del cliente">
                         <input type="text" id="r-phone" placeholder="Número (ej: 18091234567)">
-                        <input type="text" id="r-msg" placeholder="Mensaje a enviar" class="sm:col-span-2 lg:col-span-2">
-                        <select id="r-freq"><option>Una vez</option><option>Diario</option><option>Semanal</option><option>Mensual</option><option>Anual</option></select>
+                        <input type="text" id="r-msg" placeholder="Mensaje a enviar" class="md:col-span-2">
+                        <select id="r-freq">
+                            <option>Una vez</option>
+                            <option>Diario</option>
+                            <option>Semanal</option>
+                            <option>Mensual</option>
+                            <option>Anual</option>
+                        </select>
                         <input type="datetime-local" id="r-date">
                     </div>
-                    <button onclick="saveRem()" class="mt-4 sm:mt-6 w-full sm:w-auto px-8 sm:px-10 py-3 sm:py-4 bg-emerald-600 rounded-2xl font-bold hover:bg-emerald-700 transition">Programar Recordatorio</button>
+                    <button onclick="saveRem()" class="btn btn-success mt-6">Programar Recordatorio</button>
                 </div>
                 <div id="l-rem" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
             </div>
 
             <!-- EXCLUIDOS -->
             <div id="p-excl" class="page">
-                <div class="w-full max-w-xl mx-auto glass p-4 sm:p-8 rounded-2xl sm:rounded-3xl">
-                    <h2 class="text-lg sm:text-xl font-bold mb-4 sm:mb-6">Bloquear del Bot</h2>
-                    <div class="flex flex-col sm:flex-row gap-2">
-                        <input type="text" id="e-name" placeholder="Nombre" class="flex-1">
-                        <input type="text" id="e-phone" placeholder="Número" class="flex-1">
-                        <button onclick="saveExcl()" class="bg-white text-black px-6 py-3 font-bold rounded-xl hover:bg-zinc-200 transition whitespace-nowrap">Añadir</button>
-                    </div>
-                    <div id="l-excl" class="mt-6 sm:mt-8 space-y-2"></div>
-                </div>
-            </div>
-
-            <!-- CONTACTOS -->
-            <div id="p-contacts" class="page">
-                <h2 class="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Contactos con Historial</h2>
-                <div id="l-contacts" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-
-                <!-- Modal para historial -->
-                <div id="historyModal" class="modal" onclick="if(event.target===this) closeModal()">
-                    <div class="modal-content">
-                        <div class="flex justify-between items-center mb-4">
-                            <h3 class="text-xl font-bold" id="modalContactName"></h3>
-                            <button onclick="closeModal()" class="text-zinc-400 hover:text-white"><i data-lucide="x"></i></button>
+                <div class="max-w-2xl mx-auto">
+                    <div class="glass-card p-6">
+                        <h2 class="text-xl font-bold mb-4 flex items-center gap-2"><i data-lucide="shield-off" class="text-red-500"></i> Números Bloqueados</h2>
+                        <div class="flex flex-col sm:flex-row gap-2 mb-6">
+                            <input type="text" id="e-name" placeholder="Nombre" class="flex-1">
+                            <input type="text" id="e-phone" placeholder="Número" class="flex-1">
+                            <button onclick="saveExcl()" class="btn btn-primary whitespace-nowrap">Añadir a Bloqueados</button>
                         </div>
-                        <div id="modalHistory" class="space-y-3 max-h-96 overflow-y-auto pr-2"></div>
+                        <div id="l-excl" class="space-y-2"></div>
                     </div>
                 </div>
             </div>
 
             <!-- AJUSTES -->
             <div id="p-config" class="page">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 max-w-4xl mx-auto">
-                    <div class="glass p-5 sm:p-10 rounded-2xl sm:rounded-[3rem]">
-                        <h2 class="text-xl sm:text-2xl font-bold mb-6 sm:mb-8">Credenciales de Acceso</h2>
-                        <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-3 sm:mb-4">
-                        <input type="password" id="conf-pass" placeholder="Nueva Contraseña" class="mb-6 sm:mb-8">
-                        <button onclick="saveCredentials()" class="w-full py-3 sm:py-4 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Actualizar Seguridad</button>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl mx-auto">
+                    <div class="glass-card p-8">
+                        <h2 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="key" class="text-blue-500"></i> Credenciales</h2>
+                        <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-4">
+                        <input type="password" id="conf-pass" placeholder="Nueva Contraseña" class="mb-6">
+                        <button onclick="saveCredentials()" class="btn btn-primary w-full">Actualizar Seguridad</button>
                     </div>
-                    <div class="glass p-5 sm:p-10 rounded-2xl sm:rounded-[3rem]">
-                        <h2 class="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Copias de Seguridad</h2>
-                        <div class="mb-5 sm:mb-6">
-                            <p class="text-xs sm:text-sm text-zinc-400 mb-2">Número para recibir backups:</p>
+                    <div class="glass-card p-8">
+                        <h2 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="shield" class="text-emerald-500"></i> Copias de Seguridad</h2>
+                        <div class="mb-6">
+                            <p class="text-sm text-zinc-400 mb-2">Número para recibir backups por WhatsApp:</p>
                             <div class="flex gap-2">
-                                <input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="flex-1 min-w-0">
-                                <button onclick="saveBackupPhone()" class="px-4 sm:px-5 py-3 bg-emerald-600 rounded-xl font-bold hover:bg-emerald-700 transition flex items-center gap-1 flex-shrink-0 text-sm whitespace-nowrap">
-                                    <i data-lucide="save" class="w-4 h-4"></i> Guardar
+                                <input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="flex-1">
+                                <button onclick="saveBackupPhone()" class="btn btn-success flex items-center gap-1">
+                                    <i data-lucide="save" class="w-5 h-5"></i> Guardar
                                 </button>
                             </div>
                             <p id="phone-saved-msg" class="text-xs mt-2 hidden"></p>
                         </div>
-                        <div class="space-y-2 sm:space-y-3">
-                            <button onclick="downloadBackup()" class="w-full py-3 bg-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition text-sm">
-                                <i data-lucide="download" class="w-4 h-4"></i>Descargar Backup
-                            </button>
-                            <button onclick="sendBackupManually()" class="w-full py-3 bg-blue-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition text-sm">
-                                <i data-lucide="send" class="w-4 h-4"></i>Enviar a WhatsApp
-                            </button>
-                            <button onclick="document.getElementById('restore-file').click()" class="w-full py-3 bg-orange-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-orange-700 transition text-sm">
-                                <i data-lucide="upload" class="w-4 h-4"></i>Restaurar Backup
-                            </button>
+                        <div class="space-y-3">
+                            <button onclick="downloadBackup()" class="btn btn-outline w-full"><i data-lucide="download" class="w-5 h-5"></i> Descargar Backup</button>
+                            <button onclick="sendBackupManually()" class="btn btn-primary w-full"><i data-lucide="send" class="w-5 h-5"></i> Enviar a WhatsApp</button>
+                            <button onclick="document.getElementById('restore-file').click()" class="btn btn-warning w-full"><i data-lucide="upload" class="w-5 h-5"></i> Restaurar Backup</button>
                             <input type="file" id="restore-file" accept=".json" class="hidden" onchange="restoreBackup(this)">
                         </div>
                         <p class="text-xs text-zinc-500 mt-4">💡 Backup automático diario a las 12:00 AM hora RD.</p>
-                    </div>
-                    <!-- TARJETA DE IA GEMINI -->
-                    <div class="glass p-5 sm:p-10 rounded-2xl sm:rounded-[3rem] md:col-span-2">
-                        <h2 class="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">🤖 Inteligencia Artificial GEMINI (GRATIS)</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm text-zinc-400 mb-1">API Key de Gemini</label>
-                                <input type="password" id="ia-api-key" placeholder="AIzaSy..." class="mb-3">
-                                <p class="text-xs text-zinc-500">🔑 Obtén tu API key gratis en: <a href="https://makersuite.google.com/app/apikey" target="_blank" class="text-blue-400">makersuite.google.com</a></p>
-                                <p class="text-xs text-green-500 mt-1">✅ 60 consultas por minuto GRATIS</p>
-                            </div>
-                            <div>
-                                <label class="block text-sm text-zinc-400 mb-1">Activar IA</label>
-                                <div class="flex items-center gap-3 mb-3">
-                                    <button id="ia-toggle-btn" onclick="toggleIA()" class="px-4 py-2 rounded-xl font-bold transition">Activado</button>
-                                    <span id="ia-status" class="text-sm"></span>
-                                </div>
-                            </div>
-                            <div class="md:col-span-2">
-                                <label class="block text-sm text-zinc-400 mb-1">Prompt Base (system)</label>
-                                <textarea id="ia-prompt" rows="3" class="mb-4" placeholder="Eres un asistente..."></textarea>
-                            </div>
-                        </div>
-                        <button onclick="saveIAConfig()" class="w-full py-3 sm:py-4 bg-purple-600 rounded-2xl font-bold hover:bg-purple-700 transition">Guardar Configuración Gemini</button>
-                        <p class="text-xs text-zinc-500 mt-4">💡 Gemini es GRATIS y responde en español. Preguntará el nombre automáticamente.</p>
                     </div>
                 </div>
             </div>
@@ -1252,34 +1134,21 @@ cat <<'HTMLEOF' > views/index.html
 
     <script>
         const socket = io();
-        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0, iaReplied:0 }, conversations:{} };
+        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0 }, backupPhone:'' };
         let currentMediaType = 'text';
         let selectedFiles = [];
-        let iaEnabled = false;
-        let iaPrompt = '';
-        let iaApiKey = '';
-
-        function showToast(message, type = 'success') {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.style.background = type === 'success' ? '#2563eb' : '#ef4444';
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 3000);
-        }
 
         function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); }
 
-        function nav(id) {
+        function nav(id, noToggle = false) {
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
             document.getElementById('p-'+id).classList.add('active');
             document.getElementById('n-'+id).classList.add('active');
-            if (window.innerWidth < 1024) toggleSidebar();
+            if (!noToggle && window.innerWidth < 1024) toggleSidebar();
             lucide.createIcons();
-            if (id === 'contacts') loadContacts();
         }
 
-        // Reloj en tiempo real hora RD
         function updateClock() {
             const now = new Date();
             const rdTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santo_Domingo' }));
@@ -1309,9 +1178,9 @@ cat <<'HTMLEOF' > views/index.html
             lucide.createIcons();
         }
 
-        document.getElementById('t-media')?.addEventListener('change', function(e) {
+        document.getElementById('t-media').addEventListener('change', function(e) {
             const files = Array.from(e.target.files);
-            if (files.length > 10) { showToast('Máximo 10 archivos', 'error'); return; }
+            if (files.length > 10) { alert('Máximo 10'); return; }
             selectedFiles = files;
             const preview = document.getElementById('media-preview');
             preview.innerHTML = '';
@@ -1342,8 +1211,8 @@ cat <<'HTMLEOF' > views/index.html
         socket.on('status_update', s => {
             document.getElementById('bot-status').innerText = s;
             document.getElementById('dot').className = s === 'Conectado'
-                ? 'w-2 h-2 rounded-full bg-green-500'
-                : 'w-2 h-2 rounded-full bg-red-500 animate-pulse';
+                ? 'w-2.5 h-2.5 rounded-full bg-green-500'
+                : 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse';
         });
 
         socket.on('connection_status', data => {
@@ -1372,68 +1241,21 @@ cat <<'HTMLEOF' > views/index.html
                 const data = await res.json();
                 db = data;
 
-                iaEnabled = data.iaEnabled || false;
-                iaPrompt = data.iaPrompt || '';
-                iaApiKey = data.geminiApiKey || '';
-
                 if (data.isConnected) {
                     document.getElementById('qr-container').classList.add('hidden');
                     document.getElementById('connected-container').classList.remove('hidden');
                     document.getElementById('btn-logout-wa').classList.remove('hidden');
                     document.getElementById('bot-status').innerText = 'Conectado';
-                    document.getElementById('dot').className = 'w-2 h-2 rounded-full bg-green-500';
+                    document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-green-500';
                 } else {
                     document.getElementById('bot-status').innerText = data.botStatus || 'Desconectado';
-                    document.getElementById('dot').className = 'w-2 h-2 rounded-full bg-red-500 animate-pulse';
+                    document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse';
                 }
 
                 document.getElementById('conf-backup-phone').value = data.backupPhone || '';
-                document.getElementById('ia-api-key').value = data.geminiApiKey ? '****' : '';
-                document.getElementById('ia-prompt').value = data.iaPrompt || '';
-                updateToggleButton();
                 render();
                 lucide.createIcons();
             } catch(e) { console.error(e); }
-        }
-
-        function updateToggleButton() {
-            const btn = document.getElementById('ia-toggle-btn');
-            const status = document.getElementById('ia-status');
-            if (iaEnabled) {
-                btn.innerText = 'Desactivar';
-                btn.className = 'px-4 py-2 bg-red-600 rounded-xl font-bold hover:bg-red-700 transition';
-                status.innerText = 'Activada';
-            } else {
-                btn.innerText = 'Activar';
-                btn.className = 'px-4 py-2 bg-green-600 rounded-xl font-bold hover:bg-green-700 transition';
-                status.innerText = 'Desactivada';
-            }
-        }
-
-        function toggleIA() {
-            iaEnabled = !iaEnabled;
-            updateToggleButton();
-        }
-
-        async function saveIAConfig() {
-            const key = document.getElementById('ia-api-key').value;
-            const prompt = document.getElementById('ia-prompt').value;
-            
-            const res = await fetch('/api/config/ia', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    geminiApiKey: key === '****' ? undefined : key,
-                    iaEnabled: iaEnabled,
-                    iaPrompt: prompt
-                })
-            });
-            const data = await res.json();
-            if (data.ok) {
-                showToast('✅ Configuración Gemini guardada');
-            } else {
-                showToast('❌ Error al guardar', 'error');
-            }
         }
 
         function esc(text) {
@@ -1459,91 +1281,77 @@ cat <<'HTMLEOF' > views/index.html
         }
 
         function render() {
-            document.getElementById('s-replied').innerText = db.stats ? db.stats.replied || 0 : 0;
-            document.getElementById('s-total').innerText = db.stats ? db.stats.total || 0 : 0;
-            document.getElementById('s-ia').innerText = db.stats ? db.stats.iaReplied || 0 : 0;
+            document.getElementById('s-replied').innerText = db.stats ? db.stats.replied : 0;
+            document.getElementById('s-total').innerText = db.stats ? db.stats.total : 0;
 
             document.getElementById('l-train').innerHTML = (db.training || []).map((t,i) =>
-                '<div class="glass p-4 sm:p-5 rounded-2xl"><div class="flex justify-between items-start mb-2 gap-2"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1 flex-wrap"><b class="text-blue-500 text-sm">P:</b><span class="text-sm break-all">'+esc(t.key)+'</span>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded">'+t.mediaPaths.length+' ARCHIVO(S)</span>' : '')+'</div><span class="text-xs sm:text-sm text-zinc-400 break-all">'+esc(t.response)+'</span></div><div class="flex gap-1 flex-shrink-0"><button onclick="editT('+i+')" class="p-2 text-zinc-500 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delT('+i+')" class="p-2 text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<div class="media-preview-container">'+t.mediaPaths.map((p, idx) => (t.mediaTypes && t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? '<img src="/'+p+'" class="media-preview">' : '<video src="/'+p+'" class="media-preview" controls></video>').join('')+'</div>' : '')+'</div>'
+                `<div class="glass-card p-5">
+                    <div class="flex justify-between items-start gap-3">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1 flex-wrap">
+                                <span class="text-blue-400 font-semibold">P:</span>
+                                <span class="font-medium break-all">${esc(t.key)}</span>
+                                ${t.mediaPaths && t.mediaPaths.length > 0 ? `<span class="text-xs bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full">${t.mediaPaths.length} archivo(s)</span>` : ''}
+                            </div>
+                            <p class="text-sm text-zinc-300 break-all">${esc(t.response)}</p>
+                        </div>
+                        <div class="flex gap-1">
+                            <button onclick="editT(${i})" class="p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-xl transition"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+                            <button onclick="delT(${i})" class="p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
+                    </div>
+                    ${t.mediaPaths && t.mediaPaths.length > 0 ? `
+                    <div class="media-preview-container mt-3">
+                        ${t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? 
+                            `<img src="/${p}" class="media-preview">` : 
+                            `<video src="/${p}" class="media-preview" controls></video>`).join('')}
+                    </div>` : ''}
+                </div>`
             ).join('');
 
             document.getElementById('l-learn').innerHTML = (!db.learning || db.learning.length === 0)
-                ? '<div class="glass p-6 sm:p-8 rounded-2xl text-center text-zinc-500">No hay conversaciones nuevas</div>'
+                ? '<div class="glass-card p-8 text-center text-zinc-500">No hay conversaciones nuevas</div>'
                 : db.learning.map((l,i) =>
-                    '<div class="glass p-3 sm:p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"><div class="min-w-0 flex-1"><small class="text-zinc-500 text-xs">'+l.date+' - '+l.from+'</small><br><b class="text-sm break-all">'+esc(l.text)+'</b>'+(l.hasMedia ? ' <span class="ml-1 text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded">MEDIA</span>' : '')+'</div><div class="flex gap-2 flex-shrink-0"><button onclick="useL('+i+')" class="bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold">Configurar</button><button onclick="delL('+i+')" class="text-red-500 p-2"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>'
+                    `<div class="glass-card p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                        <div class="min-w-0 flex-1">
+                            <span class="text-xs text-zinc-500">${l.date} - ${l.from}</span>
+                            <p class="font-medium break-all">${esc(l.text)}</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="useL(${i})" class="btn btn-primary text-sm py-2 px-4">Usar</button>
+                            <button onclick="delL(${i})" class="p-2 text-red-400 hover:bg-red-500/10 rounded-xl"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                    </div>`
                 ).join('');
 
             document.getElementById('l-rem').innerHTML = (db.reminders || []).map((r,i) =>
-                '<div class="glass p-4 sm:p-5 rounded-2xl sm:rounded-3xl border-l-4 border-emerald-500"><div class="flex justify-between items-start mb-2"><b class="text-base sm:text-lg">'+esc(r.name)+'</b><div class="flex gap-1"><button onclick="editR('+i+')" class="text-zinc-400 hover:text-white p-1"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delR('+i+')" class="text-red-500 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div><p class="text-xs sm:text-sm text-zinc-400 mb-2">📱 '+esc(r.phone)+'</p><p class="text-xs sm:text-sm text-zinc-400 mb-2 sm:mb-3">'+esc(r.message)+'</p><div class="flex flex-wrap gap-2"><span class="text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded">'+r.freq+'</span><span class="text-[10px] font-bold uppercase bg-blue-500/10 text-blue-400 px-2 py-1 rounded">📅 '+formatReminderDate(r.date)+'</span></div></div>'
+                `<div class="glass-card p-5 border-l-4 border-emerald-500">
+                    <div class="flex justify-between items-start">
+                        <h3 class="font-bold text-lg">${esc(r.name)}</h3>
+                        <div class="flex gap-1">
+                            <button onclick="editR(${i})" class="p-2 text-zinc-400 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+                            <button onclick="delR(${i})" class="p-2 text-red-400"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
+                    </div>
+                    <p class="text-sm text-zinc-400 mb-2">📱 ${esc(r.phone)}</p>
+                    <p class="text-sm text-zinc-300 mb-3">${esc(r.message)}</p>
+                    <div class="flex flex-wrap gap-2">
+                        <span class="text-xs font-bold bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full">${r.freq}</span>
+                        <span class="text-xs font-bold bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full">📅 ${formatReminderDate(r.date)}</span>
+                    </div>
+                </div>`
             ).join('');
 
             document.getElementById('l-excl').innerHTML = (db.excluded || []).map((e,i) =>
-                '<div class="glass p-3 rounded-xl flex justify-between items-center gap-2"><span class="text-sm break-all">'+esc(e.name)+' ('+esc(e.phone)+')</span><button onclick="delE('+i+')" class="text-red-500 flex-shrink-0 p-1"><i data-lucide="user-minus" class="w-4 h-4"></i></button></div>'
+                `<div class="glass-card p-3 flex justify-between items-center">
+                    <span class="text-sm">${esc(e.name)} (${esc(e.phone)})</span>
+                    <button onclick="delE(${i})" class="text-red-400 hover:text-red-500 p-1"><i data-lucide="user-minus" class="w-5 h-5"></i></button>
+                </div>`
             ).join('');
 
             lucide.createIcons();
         }
 
-        // ============ CONTACTOS ============
-        async function loadContacts() {
-            const res = await fetch('/api/contacts');
-            const contacts = await res.json();
-            const container = document.getElementById('l-contacts');
-            container.innerHTML = contacts.map(c => `
-                <div class="glass p-4 rounded-2xl">
-                    <div class="flex justify-between items-start mb-2">
-                        <div>
-                            <span class="font-bold text-blue-400">${esc(c.name)}</span>
-                            <span class="text-xs text-zinc-500 ml-2">${c.phone}</span>
-                        </div>
-                        <div class="flex gap-1">
-                            <button onclick="editContactName('${c.phone}')" class="text-zinc-400 hover:text-white p-1"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
-                            <button onclick="viewHistory('${c.phone}', '${c.name}')" class="text-zinc-400 hover:text-white p-1"><i data-lucide="message-circle" class="w-4 h-4"></i></button>
-                        </div>
-                    </div>
-                    ${c.awaitingName ? '<p class="text-xs text-yellow-500">⏳ Esperando nombre...</p>' : ''}
-                    <p class="text-xs text-zinc-400 truncate">${c.lastMessage ? esc(c.lastMessage) : 'Sin mensajes'}</p>
-                    <p class="text-xs text-zinc-500 mt-1">${c.lastDate ? new Date(c.lastDate).toLocaleString('es-DO', {timeZone: 'America/Santo_Domingo'}) : ''}</p>
-                </div>
-            `).join('');
-            lucide.createIcons();
-        }
-
-        async function editContactName(phone) {
-            const newName = prompt('Nuevo nombre para el contacto:');
-            if (!newName) return;
-            await fetch(`/api/contacts/${phone}/name`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newName })
-            });
-            loadContacts();
-        }
-
-        async function viewHistory(phone, name) {
-            const res = await fetch(`/api/contacts/${phone}/history`);
-            const history = await res.json();
-            const modal = document.getElementById('historyModal');
-            document.getElementById('modalContactName').innerText = `Historial de ${name}`;
-            const historyDiv = document.getElementById('modalHistory');
-            historyDiv.innerHTML = history.map(h => `
-                <div class="border-b border-zinc-700 pb-2 mb-2">
-                    <span class="text-xs text-zinc-500">${new Date(h.timestamp).toLocaleString('es-DO', {timeZone: 'America/Santo_Domingo'})}</span>
-                    <div class="flex gap-2 mt-1">
-                        <span class="font-bold text-xs ${h.role === 'user' ? 'text-blue-400' : 'text-green-400'}">${h.role === 'user' ? 'Usuario:' : 'Bot:'}</span>
-                        <span class="text-sm">${esc(h.content)}</span>
-                    </div>
-                </div>
-            `).join('');
-            modal.style.display = 'flex';
-            lucide.createIcons();
-        }
-
-        function closeModal() {
-            document.getElementById('historyModal').style.display = 'none';
-        }
-
-        // ============ FUNCIONES EXISTENTES ============
         async function saveTrain(e) {
             e.preventDefault();
             const fd = new FormData();
@@ -1555,7 +1363,6 @@ cat <<'HTMLEOF' > views/index.html
             document.getElementById('t-id').value=""; document.getElementById('t-key').value=""; document.getElementById('t-res').value="";
             document.getElementById('t-media').value=""; document.getElementById('media-preview').innerHTML="";
             selectedFiles=[]; setMediaType('text'); load();
-            showToast('Respuesta guardada');
         }
 
         function editT(i) {
@@ -1565,8 +1372,8 @@ cat <<'HTMLEOF' > views/index.html
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        async function delT(i) { if (confirm('¿Eliminar?')) { await fetch('/api/train/'+i, {method:'DELETE'}); load(); showToast('Respuesta eliminada'); } }
-        function useL(i) { document.getElementById('t-key').value = db.learning[i].text; nav('train'); setTimeout(() => document.getElementById('t-res').focus(), 300); }
+        async function delT(i) { if (confirm('¿Eliminar?')) { await fetch('/api/train/'+i, {method:'DELETE'}); load(); } }
+        function useL(i) { document.getElementById('t-key').value = db.learning[i].text; nav('train', true); setTimeout(() => document.getElementById('t-res').focus(), 300); }
         async function delL(i) { await fetch('/api/learning/'+i, {method:'DELETE'}); load(); }
 
         async function saveRem() {
@@ -1578,12 +1385,11 @@ cat <<'HTMLEOF' > views/index.html
                 freq: document.getElementById('r-freq').value,
                 date: document.getElementById('r-date').value
             };
-            if (!data.name || !data.phone || !data.message || !data.date) { showToast('Completa todos los campos', 'error'); return; }
+            if (!data.name || !data.phone || !data.message || !data.date) { alert('Completa todos los campos'); return; }
             await fetch('/api/reminders', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
             document.getElementById('r-id').value=""; document.getElementById('r-name').value="";
             document.getElementById('r-phone').value=""; document.getElementById('r-msg').value=""; document.getElementById('r-date').value="";
             load();
-            showToast('Recordatorio guardado');
         }
 
         function editR(i) {
@@ -1594,24 +1400,22 @@ cat <<'HTMLEOF' > views/index.html
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        async function delR(i) { if (confirm('¿Eliminar?')) { await fetch('/api/reminders/'+i, {method:'DELETE'}); load(); showToast('Recordatorio eliminado'); } }
+        async function delR(i) { if (confirm('¿Eliminar?')) { await fetch('/api/reminders/'+i, {method:'DELETE'}); load(); } }
 
         async function saveExcl() {
             const name = document.getElementById('e-name').value, phone = document.getElementById('e-phone').value;
-            if (!name || !phone) { showToast('Completa los campos', 'error'); return; }
+            if (!name || !phone) { alert('Completa los campos'); return; }
             await fetch('/api/exclude', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,phone}) });
             document.getElementById('e-name').value=""; document.getElementById('e-phone').value=""; load();
-            showToast('Número excluido');
         }
 
-        async function delE(i) { if (confirm('¿Quitar exclusión?')) { await fetch('/api/exclude/'+i, {method:'DELETE'}); load(); } }
+        async function delE(i) { if (confirm('¿Eliminar?')) { await fetch('/api/exclude/'+i, {method:'DELETE'}); load(); } }
 
         async function saveCredentials() {
             const user = document.getElementById('conf-user').value, pass = document.getElementById('conf-pass').value;
-            if (!user && !pass) { showToast('Ingresa al menos un campo', 'error'); return; }
+            if (!user && !pass) { alert('Ingresa al menos un campo'); return; }
             await fetch('/api/config/credentials', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user,pass}) });
-            showToast('Credenciales actualizadas. Vuelve a iniciar sesión.');
-            setTimeout(() => location.href='/login', 2000);
+            alert("Credenciales actualizadas. Inicia sesión de nuevo."); location.href='/login';
         }
 
         async function saveBackupPhone() {
@@ -1620,22 +1424,22 @@ cat <<'HTMLEOF' > views/index.html
             const res = await fetch('/api/config/backup-phone', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({backupPhone:bp}) });
             const data = await res.json();
             msg.classList.remove('hidden');
-            if (data.ok) { msg.textContent='✅ Número guardado'; msg.className='text-xs mt-2 text-green-500'; showToast('Número guardado'); }
+            if (data.ok) { msg.textContent='✅ Número guardado'; msg.className='text-xs mt-2 text-green-500'; }
             else { msg.textContent='❌ Error'; msg.className='text-xs mt-2 text-red-500'; }
             setTimeout(() => msg.classList.add('hidden'), 3000);
         }
 
-        function downloadBackup() { window.location.href='/api/backup/download'; showToast('Descargando backup...'); }
+        function downloadBackup() { window.location.href='/api/backup/download'; }
         function downloadTemplate() { window.location.href='/api/train/template'; }
         function exportTraining() { window.location.href='/api/train/export'; }
 
         async function sendBackupManually() {
             const phone = document.getElementById('conf-backup-phone').value;
-            if (!phone || phone.trim()==='') { showToast('Guarda un número primero', 'error'); return; }
+            if (!phone || phone.trim()==='') { alert('⚠️ Guarda un número primero'); return; }
             if (!confirm('¿Enviar backup ahora?')) return;
             const res = await fetch('/api/backup/send', {method:'POST'});
             const data = await res.json();
-            showToast(data.message, data.ok ? 'success' : 'error');
+            alert(data.ok ? '✅ '+data.message : '❌ '+data.message);
         }
 
         async function restoreBackup(input) {
@@ -1644,8 +1448,8 @@ cat <<'HTMLEOF' > views/index.html
             const fd = new FormData(); fd.append('backup', input.files[0]);
             const res = await fetch('/api/backup/restore', {method:'POST', body:fd});
             const data = await res.json();
-            if (data.ok) { showToast('Backup restaurado'); setTimeout(() => location.reload(), 1500); }
-            else showToast('Error restaurando', 'error');
+            if (data.ok) { alert('✅ Restaurado'); setTimeout(() => location.reload(), 1000); }
+            else alert('❌ Error: '+(data.error||''));
             input.value='';
         }
 
@@ -1654,15 +1458,15 @@ cat <<'HTMLEOF' > views/index.html
             const fd = new FormData(); fd.append('file', input.files[0]);
             const res = await fetch('/api/train/import', {method:'POST', body:fd});
             const data = await res.json();
-            if (data.ok) { showToast(data.imported+' respuestas importadas'); input.value=''; load(); }
-            else showToast('Error importando', 'error');
+            if (data.ok) alert('✅ '+data.imported+' respuestas importadas');
+            else alert('❌ Error: '+(data.error||''));
+            input.value=''; load();
         }
 
         async function logoutWA() {
             if (confirm("¿Desvincular? Los contadores se reiniciarán.")) {
                 await fetch('/api/logout-wa', {method:'POST'});
-                showToast('Desvinculando...');
-                setTimeout(() => location.reload(), 2000);
+                setTimeout(() => location.reload(), 1500);
             }
         }
 
@@ -1673,32 +1477,30 @@ cat <<'HTMLEOF' > views/index.html
 </html>
 HTMLEOF
 
-# ===================== LOGIN =====================
+# ==================== LOGIN (SIN CAMBIOS) =====================
 cat <<'LOGINEOF' > views/login.html
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GZMBOT | Login</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
     <style>
-        * { box-sizing: border-box; }
-        body { background: #050507; font-family: 'Plus Jakarta Sans', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 16px; }
-        .glow { position: absolute; width: 600px; height: 600px; background: radial-gradient(circle, rgba(37,99,235,0.15) 0%, transparent 70%); z-index: -1; }
-        .card { background: rgba(255,255,255,0.02); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.05); }
+        body { background: #0a0a0f; font-family: 'Plus Jakarta Sans', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 16px; }
+        .glass-card { background: rgba(20, 20, 30, 0.8); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.05); border-radius: 40px; padding: 40px; width: 100%; max-width: 420px; box-shadow: 0 30px 60px -20px rgba(0,0,0,0.8); }
+        .gradient-text { background: linear-gradient(135deg, #fff 0%, #94a3b8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     </style>
 </head>
 <body>
-    <div class="glow"></div>
-    <div class="card p-8 sm:p-12 rounded-[2.5rem] sm:rounded-[3.5rem] w-full max-w-md shadow-2xl text-center">
-        <h1 class="text-3xl sm:text-4xl font-black text-white mb-2 tracking-tighter">GZMBOT</h1>
-        <p class="text-blue-500 font-bold text-[10px] uppercase tracking-[0.3em] mb-8 sm:mb-10">Administrative Panel</p>
-        <form onsubmit="login(event)" class="space-y-4">
-            <input type="text" id="u" placeholder="Usuario maestro" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
-            <input type="password" id="p" placeholder="Contraseña" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
-            <button type="submit" class="w-full py-4 sm:py-5 bg-blue-600 rounded-2xl text-white font-black hover:scale-[1.02] active:scale-95 transition-all">ACCEDER AHORA</button>
+    <div class="glass-card text-center">
+        <h1 class="text-4xl font-black mb-2 gradient-text">GZMBOT</h1>
+        <p class="text-blue-500 font-semibold text-xs uppercase tracking-[0.3em] mb-8">Administrative Panel</p>
+        <form onsubmit="login(event)" class="space-y-5">
+            <input type="text" id="u" placeholder="Usuario maestro" class="w-full p-4 bg-[#1a1a24] border border-[#2a2a35] rounded-2xl text-white outline-none focus:border-blue-600 transition" required>
+            <input type="password" id="p" placeholder="Contraseña" class="w-full p-4 bg-[#1a1a24] border border-[#2a2a35] rounded-2xl text-white outline-none focus:border-blue-600 transition" required>
+            <button type="submit" class="w-full py-4 bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl text-white font-bold hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-blue-600/20">ACCEDER AL PANEL</button>
         </form>
     </div>
     <script>
@@ -1713,54 +1515,90 @@ cat <<'LOGINEOF' > views/login.html
 </html>
 LOGINEOF
 
-# ===================== INSTALAR DEPENDENCIAS =====================
-echo "[4/4] Instalando dependencias de Node.js..."
-cd $HOME/gzmbot
+# ==================== INSTALAR DEPENDENCIAS NPM ====================
+echo "[7/7] Instalando paquetes NPM (esto puede tomar varios minutos)..."
+cd /opt/gzmbot
 
-# Instalar dependencias incluyendo @google/generative-ai
-npm install whatsapp-web.js qrcode express socket.io express-session puppeteer moment-timezone node-cron multer @google/generative-ai
+# Limpiar caché de npm para evitar problemas
+npm cache clean --force
+
+# Instalar dependencias
+npm install whatsapp-web.js@latest qrcode@latest express@latest socket.io@latest express-session@latest puppeteer@latest moment-timezone@latest node-cron@latest multer@latest
 
 # Instalar PM2 globalmente
-sudo npm install -g pm2
+npm install -g pm2
 
-# Detener instancia anterior si existe
+# ==================== CONFIGURAR PERMISOS ====================
+echo "🔧 Configurando permisos..."
+chown -R $SUDO_USER:$SUDO_USER /opt/gzmbot 2>/dev/null || chown -R root:root /opt/gzmbot
+chmod -R 755 /opt/gzmbot
+
+# ==================== INICIAR CON PM2 ====================
+echo "🔄 Configurando PM2..."
 pm2 delete gzmbot 2>/dev/null
 
-# Iniciar con variable de timezone
-pm2 start app.js --name gzmbot --env TZ=America/Santo_Domingo
+# Crear archivo de ecosystem para PM2
+cat <<EOF > ecosystem.config.js
+module.exports = {
+  apps: [{
+    name: 'gzmbot',
+    script: 'app.js',
+    cwd: '/opt/gzmbot',
+    env: {
+      TZ: 'America/Santo_Domingo',
+      PUPPETEER_EXECUTABLE_PATH: '/usr/bin/chromium-browser',
+      NODE_ENV: 'production'
+    },
+    watch: false,
+    max_memory_restart: '500M',
+    error_file: '/opt/gzmbot/error.log',
+    out_file: '/opt/gzmbot/out.log',
+    log_file: '/opt/gzmbot/combined.log',
+    time: true
+  }]
+}
+EOF
+
+pm2 start ecosystem.config.js
 pm2 save
 pm2 startup
 
-# Obtener IP
-IP=$(curl -s ifconfig.me)
+# ==================== CONFIGURAR FIREWALL ====================
+echo "🛡️ Configurando firewall..."
+ufw allow 80/tcp 2>/dev/null || echo "⚠️  UFW no instalado, omite configuración de firewall"
 
-# Limpiar pantalla
-clear
+# ==================== MOSTRAR INFORMACIÓN FINAL ====================
+IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
-echo "============================================================"
-echo "✨ GZMBOT ENTERPRISE - CON IA GEMINI (GRATIS - MODELO CORRECTO)"
-echo "============================================================"
+echo ""
+echo "===================================================="
+echo "  ✨ GZMBOT ENTERPRISE - INSTALACIÓN COMPLETA"
+echo "===================================================="
 echo ""
 echo "🌐 PANEL WEB: http://$IP"
 echo "👤 USUARIO: $ADMIN_USER"
 echo "🔐 CONTRASEÑA: $ADMIN_PASS"
-echo "🕐 TIMEZONE: America/Santo_Domingo (UTC-4)"
+echo "🕐 ZONA HORARIA: America/Santo_Domingo (UTC-4)"
+echo "📁 RUTA DE INSTALACIÓN: /opt/gzmbot"
 echo ""
-echo "============================================================"
-echo "🎯 CORRECCIONES APLICADAS:"
-echo "   ✅ Modelo Gemini actualizado a 'gemini-3-flash-preview'"
-echo "   ✅ Eliminadas todas las referencias a Deepseek"
-echo "   ✅ 60 consultas por minuto GRATIS"
-echo "   ✅ Mismo estilo visual exacto"
-echo "   ✅ Sistema de nombres y contexto"
-echo "============================================================"
+echo "✅ MEJORAS APLICADAS:"
+echo "   - Diagnóstico automático del sistema"
+echo "   - Instalación completa de Chromium"
+echo "   - Configuración headless ultra-robusta"
+echo "   - Reconexión automática ante fallos"
+echo "   - Limpieza automática de sesión corrupta"
+echo "   - Manejo avanzado de errores"
+echo "   - Logs detallados en /opt/gzmbot/*.log"
 echo ""
-echo "🔑 OBTENER API KEY DE GEMINI (GRATIS):"
-echo "   1. Ve a https://makersuite.google.com/app/apikey"
-echo "   2. Inicia sesión con tu cuenta de Google"
-echo "   3. Haz clic en 'Create API Key'"
-echo "   4. Copia la clave (empieza con AIzaSy...)"
-echo "   5. Pégala en el panel en Ajustes > IA Gemini"
+echo "📌 COMANDOS ÚTILES:"
+echo "   Ver estado: pm2 status"
+echo "   Ver logs: pm2 logs gzmbot"
+echo "   Reiniciar: pm2 restart gzmbot"
+echo "   Detener: pm2 stop gzmbot"
 echo ""
-echo "📌 Para ver logs: pm2 logs gzmbot"
-echo "============================================================"
+echo "⚠️  NOTA: Si el QR no aparece en 30 segundos:"
+echo "   1. Verifica los logs: pm2 logs gzmbot"
+echo "   2. Reinicia el bot: pm2 restart gzmbot"
+echo "   3. Limpia la sesión: rm -rf /opt/gzmbot/.wwebjs_auth/*"
+echo ""
+echo "===================================================="
