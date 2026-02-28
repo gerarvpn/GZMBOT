@@ -15,7 +15,7 @@
 #   ███████╗██║ ╚████║   ██║   ███████╗██║  ██║██║     ██║███████╗███████╗
 #   ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝
 # ============================================================
-#   INSTALACIÓN PROFESIONAL - EDICIÓN ENTERPRISE
+#   INSTALACIÓN PROFESIONAL - EDICIÓN ENTERPRISE (CORREGIDA)
 #   Optimizado para Debian/Ubuntu - QR garantizado
 # ============================================================
 
@@ -612,29 +612,35 @@ cron.schedule('* * * * *', () => {
 
     const db = getDB();
     const currentRD = nowRD().format('YYYY-MM-DDTHH:mm');
+    console.log(`⏰ [CRON] Verificando recordatorios a las ${currentRD}`); // Log de depuración
     let changed = false;
 
     for (let i = db.reminders.length - 1; i >= 0; i--) {
         const rem = db.reminders[i];
 
         if (rem.date === currentRD) {
-            console.log('🔔 Enviando recordatorio a', rem.name, '(' + rem.phone + ') -', currentRD);
+            console.log(`🔔 Enviando recordatorio a ${rem.name} (${rem.phone}) - ${currentRD}`);
 
             const chatId = rem.phone.includes('@') ? rem.phone : rem.phone + '@c.us';
-            client.sendMessage(chatId, rem.message)
-                .then(() => console.log('✅ Recordatorio enviado a', rem.name))
+            client.sendMessage(chatId, rem.message) // El mensaje conserva saltos de línea
+                .then(() => console.log(`✅ Recordatorio enviado a ${rem.name}`))
                 .catch(e => console.error("❌ Error recordatorio:", e.message));
 
             if (rem.freq === 'Diario') {
                 rem.date = moment.tz(rem.date, TZ).add(1, 'days').format('YYYY-MM-DDTHH:mm');
+                console.log(`   🔄 Nueva fecha (diario): ${rem.date}`);
             } else if (rem.freq === 'Semanal') {
                 rem.date = moment.tz(rem.date, TZ).add(7, 'days').format('YYYY-MM-DDTHH:mm');
+                console.log(`   🔄 Nueva fecha (semanal): ${rem.date}`);
             } else if (rem.freq === 'Mensual') {
                 rem.date = moment.tz(rem.date, TZ).add(1, 'months').format('YYYY-MM-DDTHH:mm');
+                console.log(`   🔄 Nueva fecha (mensual): ${rem.date}`);
             } else if (rem.freq === 'Anual') {
                 rem.date = moment.tz(rem.date, TZ).add(1, 'years').format('YYYY-MM-DDTHH:mm');
+                console.log(`   🔄 Nueva fecha (anual): ${rem.date}`);
             } else {
                 db.reminders.splice(i, 1);
+                console.log(`   🗑️ Recordatorio único eliminado`);
             }
             changed = true;
         }
@@ -768,8 +774,13 @@ app.post('/api/reminders', checkAuth, (req, res) => {
 
     console.log('📝 Recordatorio guardado:', name, '- Fecha:', date, '- Hora actual RD:', nowRD().format('YYYY-MM-DDTHH:mm'));
 
-    if (id !== "" && id !== null && id !== undefined && id !== "undefined") db.reminders[id] = data;
-    else db.reminders.push(data);
+    // Convertir id a número si es posible para asegurar que se use como índice
+    const idx = id && id !== "" && id !== null && id !== undefined && id !== "undefined" ? Number(id) : -1;
+    if (idx >= 0 && idx < db.reminders.length) {
+        db.reminders[idx] = data;
+    } else {
+        db.reminders.push(data);
+    }
     saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
@@ -885,7 +896,7 @@ APPEOF
 
 print_success "app.js creado"
 
-# ==================== INDEX.HTML (MODERNO) ====================
+# ==================== INDEX.HTML (MODERNO CON CORRECCIONES) ====================
 print_step "CREANDO INTERFAZ WEB"
 
 cat <<'HTMLEOF' > views/index.html
@@ -937,6 +948,8 @@ cat <<'HTMLEOF' > views/index.html
         .btn-warning:hover { background: #d97706; transform: translateY(-2px); }
         .btn-outline { background: transparent; border: 1px solid #2a2a35; color: #a1a1aa; }
         .btn-outline:hover { border-color: #2563eb; color: #fff; }
+        /* Clase para preservar saltos de línea en mensajes */
+        .preserve-lines { white-space: pre-wrap; }
     </style>
 </head>
 <body class="flex h-screen overflow-hidden">
@@ -1076,12 +1089,12 @@ cat <<'HTMLEOF' > views/index.html
                         <h3 class="font-bold text-xl">Programar Recordatorio</h3>
                         <span id="rem-clock" class="text-sm text-zinc-500 font-mono"></span>
                     </div>
-                    <p class="text-xs text-zinc-500 mb-4">⏰ Los recordatorios usan hora de República Dominicana (AST/UTC-4)</p>
+                    <p class="text-xs text-zinc-500 mb-4">⏰ Los recordatorios usan hora de República Dominicana (AST/UTC-4). Los saltos de línea se conservan.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         <input type="hidden" id="r-id">
                         <input type="text" id="r-name" placeholder="Nombre del cliente">
                         <input type="text" id="r-phone" placeholder="Número (ej: 18091234567)">
-                        <input type="text" id="r-msg" placeholder="Mensaje a enviar" class="md:col-span-2">
+                        <textarea id="r-msg" placeholder="Mensaje a enviar (puedes usar saltos de línea)" class="md:col-span-2 h-24"></textarea>
                         <select id="r-freq">
                             <option>Una vez</option>
                             <option>Diario</option>
@@ -1306,7 +1319,7 @@ cat <<'HTMLEOF' > views/index.html
                                 <span class="font-medium break-all">${esc(t.key)}</span>
                                 ${t.mediaPaths && t.mediaPaths.length > 0 ? `<span class="text-xs bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full">${t.mediaPaths.length} archivo(s)</span>` : ''}
                             </div>
-                            <p class="text-sm text-zinc-300 break-all">${esc(t.response)}</p>
+                            <p class="text-sm text-zinc-300 break-all whitespace-pre-wrap">${esc(t.response)}</p>
                         </div>
                         <div class="flex gap-1">
                             <button onclick="editT(${i})" class="p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-xl transition"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
@@ -1328,7 +1341,7 @@ cat <<'HTMLEOF' > views/index.html
                     `<div class="glass-card p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                         <div class="min-w-0 flex-1">
                             <span class="text-xs text-zinc-500">${l.date} - ${l.from}</span>
-                            <p class="font-medium break-all">${esc(l.text)}</p>
+                            <p class="font-medium break-all whitespace-pre-wrap">${esc(l.text)}</p>
                         </div>
                         <div class="flex gap-2">
                             <button onclick="useL(${i})" class="btn btn-primary text-sm py-2 px-4">Usar</button>
@@ -1347,7 +1360,7 @@ cat <<'HTMLEOF' > views/index.html
                         </div>
                     </div>
                     <p class="text-sm text-zinc-400 mb-2">📱 ${esc(r.phone)}</p>
-                    <p class="text-sm text-zinc-300 mb-3">${esc(r.message)}</p>
+                    <p class="text-sm text-zinc-300 mb-3 whitespace-pre-wrap">${esc(r.message)}</p>
                     <div class="flex flex-wrap gap-2">
                         <span class="text-xs font-bold bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full">${r.freq}</span>
                         <span class="text-xs font-bold bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full">📅 ${formatReminderDate(r.date)}</span>
@@ -1407,9 +1420,12 @@ cat <<'HTMLEOF' > views/index.html
 
         function editR(i) {
             const r = db.reminders[i];
-            document.getElementById('r-id').value = i; document.getElementById('r-name').value = r.name;
-            document.getElementById('r-phone').value = r.phone; document.getElementById('r-msg').value = r.message;
-            document.getElementById('r-freq').value = r.freq; document.getElementById('r-date').value = r.date;
+            document.getElementById('r-id').value = i;
+            document.getElementById('r-name').value = r.name;
+            document.getElementById('r-phone').value = r.phone;
+            document.getElementById('r-msg').value = r.message; // El textarea mostrará saltos de línea
+            document.getElementById('r-freq').value = r.freq;
+            document.getElementById('r-date').value = r.date;
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
@@ -1490,7 +1506,7 @@ cat <<'HTMLEOF' > views/index.html
 </html>
 HTMLEOF
 
-# ==================== LOGIN.HTML ====================
+# ==================== LOGIN.HTML (sin cambios) ====================
 cat <<'LOGINEOF' > views/login.html
 <!DOCTYPE html>
 <html lang="es">
