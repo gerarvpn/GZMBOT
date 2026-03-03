@@ -1,187 +1,107 @@
 #!/bin/bash
 
 # ============================================================
-#    ██████╗ ███████╗███╗   ███╗██████╗  ██████╗ ████████╗
-#   ██╔════╝ ╚══███╔╝████╗ ████║██╔══██╗██╔═══██╗╚══██╔══╝
-#   ██║  ███╗  ███╔╝ ██╔████╔██║██████╔╝██║   ██║   ██║   
-#   ██║   ██║ ███╔╝  ██║╚██╔╝██║██╔══██╗██║   ██║   ██║   
-#   ╚██████╔╝███████╗██║ ╚═╝ ██║██████╔╝╚██████╔╝   ██║   
-#    ╚═════╝ ╚══════╝╚═╝     ╚═╝╚═════╝  ╚═════╝    ╚═╝   
-#                                                          
-#   ███████╗███╗   ██╗████████╗███████╗██████╗ ██████╗ ██╗███████╗███████╗
-#   ██╔════╝████╗  ██║╚══██╔══╝██╔════╝██╔══██╗██╔══██╗██║██╔════╝██╔════╝
-#   █████╗  ██╔██╗ ██║   ██║   █████╗  ██████╔╝██████╔╝██║█████╗  █████╗  
-#   ██╔══╝  ██║╚██╗██║   ██║   ██╔══╝  ██╔══██╗██╔═══╝ ██║██╔══╝  ██╔══╝  
-#   ███████╗██║ ╚████║   ██║   ███████╗██║  ██║██║     ██║███████╗███████╗
-#   ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝
-# ============================================================
-#   INSTALACIÓN PROFESIONAL - EDICIÓN ENTERPRISE (CORREGIDA)
-#   Optimizado para Debian/Ubuntu - QR garantizado
+# GZMBOT - ENTERPRISE EDITION (QR FUNCIONAL Y CON TEXTO DE ESPERA)
 # ============================================================
 
-set -e  # Detener en caso de error
-
-# Colores para output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-WHITE='\033[1;37m'
-NC='\033[0m' # No Color
-
-# Función para imprimir con borde
-print_step() {
-    echo -e "${CYAN}┌──────────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│${NC} ${WHITE}$1${NC}"
-    echo -e "${CYAN}└──────────────────────────────────────────────┘${NC}"
-}
-
-# Función para imprimir éxito
-print_success() {
-    echo -e "${GREEN}✅ $1${NC}"
-}
-
-# Función para imprimir advertencia
-print_warning() {
-    echo -e "${YELLOW}⚠️  $1${NC}"
-}
-
-# Función para imprimir error
-print_error() {
-    echo -e "${RED}❌ $1${NC}"
-}
-
-# Función para imprimir información
-print_info() {
-    echo -e "${BLUE}ℹ️  $1${NC}"
-}
-
-# Limpiar pantalla
 clear
+echo "🚀 Iniciando Instalación de GZMBOT (versión con QR mejorado)..."
 
-# Mostrar banner
-echo -e "${MAGENTA}"
-echo '    ██████╗ ███████╗███╗   ███╗██████╗  ██████╗ ████████╗'
-echo '   ██╔════╝ ╚══███╔╝████╗ ████║██╔══██╗██╔═══██╗╚══██╔══╝'
-echo '   ██║  ███╗  ███╔╝ ██╔████╔██║██████╔╝██║   ██║   ██║   '
-echo '   ██║   ██║ ███╔╝  ██║╚██╔╝██║██╔══██╗██║   ██║   ██║   '
-echo '   ╚██████╔╝███████╗██║ ╚═╝ ██║██████╔╝╚██████╔╝   ██║   '
-echo '    ╚═════╝ ╚══════╝╚═╝     ╚═╝╚═════╝  ╚═════╝    ╚═╝   '
-echo -e "${NC}"
-echo -e "${WHITE}                     ENTERPRISE EDITION${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}        Instalación Profesional - Debian/Ubuntu${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}\n"
-
-# Verificar ejecución como root
-if [[ $EUID -ne 0 ]]; then
-   print_error "Este script debe ejecutarse como root (sudo)"
-   exit 1
-fi
-
-# Solicitar credenciales
-print_step "CONFIGURACIÓN DE ACCESO"
-
-read -p "$(echo -e ${WHITE}👤 Usuario Maestro: ${NC})" ADMIN_USER
-read -sp "$(echo -e ${WHITE}🔐 Contraseña Maestra: ${NC})" ADMIN_PASS
+read -p "👤 Usuario Maestro: " ADMIN_USER
+read -sp "🔐 Contraseña Maestra: " ADMIN_PASS
 echo -e "\n"
 
-print_success "Credenciales guardadas"
+# ----------------------------------------------------------------------
+# 1. INSTALAR DEPENDENCIAS DEL SISTEMA Y GOOGLE CHROME STABLE
+# ----------------------------------------------------------------------
+echo "📦 Instalando dependencias del sistema y Google Chrome..."
+sudo apt-get update
+sudo apt-get install -y \
+    curl wget gnupg2 \
+    ca-certificates \
+    fonts-liberation \
+    libappindicator3-1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libgcc-s1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    xdg-utils \
+    --no-install-recommends
 
-# ==================== FUNCIÓN DE DIAGNÓSTICO ====================
-print_step "DIAGNÓSTICO DEL SISTEMA"
+# Agregar repositorio de Google Chrome e instalarlo
+wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+sudo apt-get update
+sudo apt-get install -y google-chrome-stable
 
-# Verificar arquitectura
-ARCH=$(uname -m)
-print_info "Arquitectura: $ARCH"
-
-# Verificar memoria RAM
-MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
-print_info "Memoria RAM total: ${MEM_TOTAL}MB"
-
-if [ $MEM_TOTAL -lt 512 ]; then
-    print_warning "Poca memoria RAM detectable. Puede causar problemas."
-fi
-
-# Verificar espacio en disco
-DISK_SPACE=$(df -m /opt | awk 'NR==2 {print $4}' 2>/dev/null || df -m / | awk 'NR==2 {print $4}')
-print_info "Espacio disponible: ${DISK_SPACE}MB"
-
-if [ $DISK_SPACE -lt 1000 ]; then
-    print_warning "Poco espacio en disco. Se recomienda al menos 1GB."
-fi
-
-# Verificar conectividad a Internet
-print_info "Verificando conectividad..."
-if ping -c 1 google.com &> /dev/null; then
-    print_success "Conexión a Internet detectada"
-else
-    print_error "Sin conexión a Internet. Verifica tu red."
+# Verificar instalación
+if ! command -v google-chrome-stable &> /dev/null; then
+    echo "❌ Error: No se pudo instalar Google Chrome."
     exit 1
 fi
+echo "✅ Google Chrome instalado: $(google-chrome-stable --version)"
 
-# ==================== ACTUALIZAR SISTEMA ====================
-print_step "ACTUALIZANDO SISTEMA"
-apt-get update -qq && print_success "Repositorios actualizados"
-apt-get upgrade -y -qq && print_success "Paquetes actualizados"
+# Actualizar caché de librerías
+sudo ldconfig
 
-# ==================== INSTALAR DEPENDENCIAS ====================
-print_step "INSTALANDO DEPENDENCIAS DEL SISTEMA"
-
-# Lista completa de dependencias
-DEPS="curl wget git build-essential libnss3 libatk-bridge2.0-0 libx11-xcb1 libxcb-dri3-0 libdrm2 libgbm1 libxcomposite1 libxdamage1 libxrandr2 libasound2 libpangocairo-1.0-0 libxcursor1 libxi6 libxtst6 libcups2 libxss1 libxshmfence1 fonts-liberation libappindicator3-1 libatspi2.0-0 libnspr4 libgtk-3-0 ca-certificates xdg-utils"
-
-apt-get install -y -qq $DEPS && print_success "Dependencias instaladas"
-
-# ==================== INSTALAR CHROMIUM ====================
-print_step "INSTALANDO CHROMIUM"
-
-if command -v chromium-browser &> /dev/null; then
-    print_success "Chromium ya está instalado"
-else
-    apt-get install -y -qq chromium-browser chromium-codecs-ffmpeg && print_success "Chromium instalado"
-fi
-
-CHROME_PATH=$(which chromium-browser 2>/dev/null || echo "/usr/bin/chromium-browser")
-print_info "Chromium: $CHROME_PATH"
-
-# ==================== INSTALAR NODE.JS 18 ====================
-print_step "INSTALANDO NODE.JS 18"
-
-if command -v node &> /dev/null; then
-    NODE_VER=$(node -v)
-    print_info "Node.js ya instalado: $NODE_VER"
-else
-    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - &> /dev/null
-    apt-get install -y -qq nodejs && print_success "Node.js 18 instalado"
-fi
-
-# ==================== CONFIGURAR TIMEZONE RD ====================
-print_step "CONFIGURANDO ZONA HORARIA"
-
-timedatectl set-timezone America/Santo_Domingo 2>/dev/null || echo "America/Santo_Domingo" > /etc/timezone
+# ----------------------------------------------------------------------
+# 2. CONFIGURAR VARIABLES DE ENTORNO PARA PUPPETEER
+# ----------------------------------------------------------------------
+export PUPPETEER_EXECUTABLE_PATH=$(which google-chrome-stable)
+export PUPPETEER_SKIP_DOWNLOAD=true
 export TZ='America/Santo_Domingo'
-print_success "Zona horaria: America/Santo_Domingo (RD)"
 
-# ==================== CREAR ESTRUCTURA DE DIRECTORIOS ====================
-print_step "CREANDO ESTRUCTURA DE DIRECTORIOS"
+# ----------------------------------------------------------------------
+# 3. INSTALAR NODE.JS 18
+# ----------------------------------------------------------------------
+echo "🟢 Instalando Node.js 18..."
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-INSTALL_DIR="/opt/gzmbot"
-mkdir -p $INSTALL_DIR/views
-mkdir -p $INSTALL_DIR/data
-mkdir -p $INSTALL_DIR/media
-mkdir -p $INSTALL_DIR/backups
-mkdir -p $INSTALL_DIR/.wwebjs_auth
-mkdir -p $INSTALL_DIR/.cache/puppeteer
-cd $INSTALL_DIR
+# ----------------------------------------------------------------------
+# 4. CONFIGURAR ZONA HORARIA
+# ----------------------------------------------------------------------
+sudo timedatectl set-timezone America/Santo_Domingo 2>/dev/null || true
 
-print_success "Directorios creados en $INSTALL_DIR"
+# ----------------------------------------------------------------------
+# 5. CREAR ESTRUCTURA DE CARPETAS
+# ----------------------------------------------------------------------
+mkdir -p $HOME/gzmbot/views
+mkdir -p $HOME/gzmbot/data
+mkdir -p $HOME/gzmbot/media
+mkdir -p $HOME/gzmbot/backups
+cd $HOME/gzmbot
 
-# ==================== CONFIG.JSON ====================
-print_step "GENERANDO ARCHIVOS DE CONFIGURACIÓN"
-
+# ----------------------------------------------------------------------
+# 6. CONFIG.JSON
+# ----------------------------------------------------------------------
 cat <<EOF > config.json
 {
   "adminUser": "$ADMIN_USER",
@@ -192,18 +112,12 @@ cat <<EOF > config.json
 }
 EOF
 
-print_success "config.json creado"
-
-# ==================== APP.JS (BACKEND MEJORADO) ====================
-print_step "CREANDO APP.JS"
-
+# ----------------------------------------------------------------------
+# 7. BACKEND (app.js) - CON QR MEJORADO
+# ----------------------------------------------------------------------
 cat <<'APPEOF' > app.js
 // Forzar timezone del proceso a RD
 process.env.TZ = 'America/Santo_Domingo';
-
-// Configuración de Puppeteer para entornos headless
-process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = 'false';
-process.env.PUPPETEER_EXECUTABLE_PATH = '/usr/bin/chromium-browser';
 
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
@@ -216,45 +130,18 @@ const path = require('path');
 const cron = require('node-cron');
 const moment = require('moment-timezone');
 const multer = require('multer');
-const { exec } = require('child_process');
 
 const TZ = 'America/Santo_Domingo';
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
-});
+const io = socketIo(server);
 
 const DB_PATH = path.join(__dirname, 'data/database.json');
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const MEDIA_PATH = path.join(__dirname, 'media');
 const BACKUP_PATH = path.join(__dirname, 'backups');
 const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
-const CHROME_PATH = '/usr/bin/chromium-browser';
 
-// Verificar existencia de Chromium
-if (!fs.existsSync(CHROME_PATH)) {
-    console.log('⚠️ Chromium no encontrado en la ruta predeterminada, buscando...');
-    // Intentar encontrar chromium en otras ubicaciones comunes
-    const possiblePaths = [
-        '/usr/bin/chromium',
-        '/usr/bin/chromium-browser',
-        '/snap/bin/chromium'
-    ];
-    
-    for (const p of possiblePaths) {
-        if (fs.existsSync(p)) {
-            process.env.PUPPETEER_EXECUTABLE_PATH = p;
-            console.log(`✅ Chromium encontrado en: ${p}`);
-            break;
-        }
-    }
-}
-
-// Inicializar DB si no existe
 if (!fs.existsSync(DB_PATH)) {
     fs.writeFileSync(DB_PATH, JSON.stringify({
         training: [], reminders: [], excluded: [], learning: [],
@@ -287,6 +174,7 @@ app.use(session({
 const getDB = () => JSON.parse(fs.readFileSync(DB_PATH));
 const saveDB = (data) => fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
 
+// Función para obtener hora actual de RD
 function nowRD() {
     return moment().tz(TZ);
 }
@@ -294,193 +182,77 @@ function nowRD() {
 let client;
 let botStatus = "Desconectado";
 let lastQR = null;
+let lastQRImage = null; // Guardar la última imagen generada
 let isConnected = false;
-let qrGenerationAttempts = 0;
-let clientInitialized = false;
 
 console.log('🕐 Hora del servidor:', new Date().toString());
 console.log('🕐 Hora RD (moment):', nowRD().format('DD/MM/YYYY HH:mm:ss'));
 console.log('🕐 Timezone configurado:', TZ);
-console.log('🖥️  Chromium path:', process.env.PUPPETEER_EXECUTABLE_PATH || CHROME_PATH);
 
-// Función para limpiar sesión
-function cleanAuthSession() {
-    console.log('🧹 Limpiando sesión anterior...');
-    if (fs.existsSync(AUTH_PATH)) {
-        try {
-            fs.rmSync(AUTH_PATH, { recursive: true, force: true });
-            console.log('✅ Sesión eliminada');
-        } catch (e) {
-            console.error('❌ Error eliminando sesión:', e.message);
-        }
+// Manejar conexión de nuevos sockets
+io.on('connection', (socket) => {
+    console.log('Cliente conectado al socket');
+    // Si hay una imagen QR guardada, enviarla al nuevo cliente
+    if (lastQRImage) {
+        socket.emit('qr_update', lastQRImage);
     }
-    
-    // Limpiar también la caché de Puppeteer
-    const puppeteerCache = path.join(__dirname, '.cache');
-    if (fs.existsSync(puppeteerCache)) {
-        try {
-            fs.rmSync(puppeteerCache, { recursive: true, force: true });
-            console.log('✅ Caché de Puppeteer eliminada');
-        } catch (e) {
-            console.error('❌ Error eliminando caché:', e.message);
-        }
-    }
-}
+});
 
-// Verificar conectividad a Internet
-function checkInternet() {
-    return new Promise((resolve) => {
-        exec('ping -c 1 google.com', (error) => {
-            resolve(!error);
-        });
-    });
-}
-
-// Inicializar bot con configuración ultra-robusta
-async function initBot() {
-    if (clientInitialized) {
-        console.log('⚠️ Cliente ya inicializado, cerrando anterior...');
-        try {
-            await client.destroy();
-        } catch (e) {
-            console.error('Error destruyendo cliente anterior:', e.message);
-        }
-    }
-    
-    // Verificar internet
-    const hasInternet = await checkInternet();
-    if (!hasInternet) {
-        console.error('❌ Sin conexión a Internet. Verifica tu conexión.');
-        botStatus = "Sin Internet";
-        io.emit('status_update', botStatus);
-        setTimeout(initBot, 30000); // Reintentar en 30 segundos
-        return;
-    }
-    
-    console.log('🔄 Inicializando cliente de WhatsApp...');
-    
-    // Limpiar si hay muchos intentos fallidos
-    if (qrGenerationAttempts > 3) {
-        cleanAuthSession();
-        qrGenerationAttempts = 0;
-    }
-    
-    const puppeteerConfig = {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--disable-gpu',
-            '--disable-software-rasterizer',
-            '--disable-features=VizDisplayCompositor',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--disable-web-security',
-            '--disable-features=BlockInsecurePrivateNetworkRequests',
-            '--disable-features=OutOfBlinkCors',
-            '--disable-webgl',
-            '--disable-font-subpixel-positioning',
-            '--disable-lcd-text',
-            '--disable-default-apps',
-            '--disable-extensions',
-            '--disable-component-extensions-with-background-pages',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            '--window-size=1920,1080',
-            '--start-maximized',
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--disable-client-side-phishing-detection',
-            '--disable-component-update',
-            '--disable-sync',
-            '--disable-breakpad',
-            '--disable-ipc-flooding-protection',
-            '--disable-background-networking',
-            '--metrics-recording-only',
-            '--mute-audio'
-        ]
-    };
-    
-    // Usar el executable path si está disponible
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-        puppeteerConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-    }
-    
+function initBot() {
     client = new Client({
-        authStrategy: new LocalAuth({ 
-            dataPath: AUTH_PATH,
-            clientId: 'gzmbot-main-client' 
-        }),
-        puppeteer: puppeteerConfig,
-        webVersionCache: {
-            type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+        authStrategy: new LocalAuth({ dataPath: AUTH_PATH }),
+        puppeteer: {
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         }
     });
 
     client.on('qr', (qr) => {
-        console.log('📲 QR generado correctamente');
         botStatus = "Esperando QR";
         isConnected = false;
         lastQR = qr;
         qrcode.toDataURL(qr, (err, url) => {
-            if (err) {
-                console.error('❌ Error generando imagen QR:', err);
-                return;
+            if (!err) {
+                lastQRImage = url; // Guardar la imagen
+                io.emit('qr_update', url);
+            } else {
+                console.error('Error generando QR:', err);
+                lastQRImage = null;
             }
-            io.emit('qr_update', url);
             io.emit('connection_status', { connected: false, status: botStatus });
             io.emit('status_update', botStatus);
-            console.log('✅ QR enviado al cliente web');
         });
-        qrGenerationAttempts++;
     });
 
     client.on('ready', () => {
         botStatus = "Conectado";
         isConnected = true;
         lastQR = null;
-        qrGenerationAttempts = 0;
-        clientInitialized = true;
+        lastQRImage = null; // Limpiar QR
         io.emit('status_update', botStatus);
         io.emit('connection_status', { connected: true, status: botStatus });
-        console.log('✅✅✅ BOT CONECTADO EXITOSAMENTE -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+        console.log('✅ Bot conectado -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
     });
 
-    client.on('authenticated', () => {
-        console.log('🔐 Autenticación exitosa');
-    });
+    client.on('authenticated', () => console.log('🔐 Autenticado'));
 
     client.on('auth_failure', (msg) => {
-        console.error('❌ Fallo de autenticación:', msg);
+        console.error('❌ Auth failure:', msg);
         botStatus = "Error de autenticación";
         io.emit('status_update', botStatus);
-        qrGenerationAttempts++;
-        
-        if (qrGenerationAttempts > 5) {
-            console.log('🔄 Demasiados fallos, limpiando sesión...');
-            cleanAuthSession();
-            qrGenerationAttempts = 0;
-        }
     });
 
     client.on('disconnected', (reason) => {
         botStatus = "Desconectado";
         isConnected = false;
-        clientInitialized = false;
+        lastQR = null;
+        lastQRImage = null; // Limpiar QR al desconectar
         io.emit('status_update', botStatus);
         io.emit('connection_status', { connected: false, status: botStatus });
+        // Opcional: emitir un evento para limpiar QR en el frontend
+        io.emit('qr_clear'); // Nuevo evento para indicar que no hay QR
         console.log('❌ Bot desconectado:', reason);
-        
-        // Reintentar conexión después de 10 segundos
-        setTimeout(() => {
-            if (!isConnected) {
-                console.log('🔄 Reintentando conexión...');
-                initBot();
-            }
-        }, 10000);
     });
 
     client.on('message', async (msg) => {
@@ -534,18 +306,7 @@ async function initBot() {
         }
     });
 
-    try {
-        console.log('🚀 Iniciando cliente...');
-        await client.initialize();
-        console.log('✅ Cliente inicializado correctamente');
-    } catch (e) {
-        console.error('❌ Error al iniciar cliente:', e);
-        botStatus = "Error de inicialización";
-        io.emit('status_update', botStatus);
-        
-        // Reintentar después de 15 segundos
-        setTimeout(initBot, 15000);
-    }
+    client.initialize().catch(e => console.error("Error al iniciar:", e));
 }
 
 async function createBackup() {
@@ -612,35 +373,29 @@ cron.schedule('* * * * *', () => {
 
     const db = getDB();
     const currentRD = nowRD().format('YYYY-MM-DDTHH:mm');
-    console.log(`⏰ [CRON] Verificando recordatorios a las ${currentRD}`); // Log de depuración
     let changed = false;
 
     for (let i = db.reminders.length - 1; i >= 0; i--) {
         const rem = db.reminders[i];
 
         if (rem.date === currentRD) {
-            console.log(`🔔 Enviando recordatorio a ${rem.name} (${rem.phone}) - ${currentRD}`);
+            console.log('🔔 Enviando recordatorio a', rem.name, '(' + rem.phone + ') -', currentRD);
 
             const chatId = rem.phone.includes('@') ? rem.phone : rem.phone + '@c.us';
-            client.sendMessage(chatId, rem.message) // El mensaje conserva saltos de línea
-                .then(() => console.log(`✅ Recordatorio enviado a ${rem.name}`))
+            client.sendMessage(chatId, rem.message)
+                .then(() => console.log('✅ Recordatorio enviado a', rem.name))
                 .catch(e => console.error("❌ Error recordatorio:", e.message));
 
             if (rem.freq === 'Diario') {
                 rem.date = moment.tz(rem.date, TZ).add(1, 'days').format('YYYY-MM-DDTHH:mm');
-                console.log(`   🔄 Nueva fecha (diario): ${rem.date}`);
             } else if (rem.freq === 'Semanal') {
                 rem.date = moment.tz(rem.date, TZ).add(7, 'days').format('YYYY-MM-DDTHH:mm');
-                console.log(`   🔄 Nueva fecha (semanal): ${rem.date}`);
             } else if (rem.freq === 'Mensual') {
                 rem.date = moment.tz(rem.date, TZ).add(1, 'months').format('YYYY-MM-DDTHH:mm');
-                console.log(`   🔄 Nueva fecha (mensual): ${rem.date}`);
             } else if (rem.freq === 'Anual') {
                 rem.date = moment.tz(rem.date, TZ).add(1, 'years').format('YYYY-MM-DDTHH:mm');
-                console.log(`   🔄 Nueva fecha (anual): ${rem.date}`);
             } else {
                 db.reminders.splice(i, 1);
-                console.log(`   🗑️ Recordatorio único eliminado`);
             }
             changed = true;
         }
@@ -657,8 +412,7 @@ cron.schedule('* * * * *', () => {
 
 console.log('⏰ Recordatorios activos - verificando cada minuto en hora RD');
 
-// Iniciar el bot después de 2 segundos (para asegurar que todo esté listo)
-setTimeout(initBot, 2000);
+initBot();
 
 const checkAuth = (req, res, next) => req.session.user ? next() : res.status(401).send("Unauthorized");
 
@@ -675,14 +429,10 @@ app.post('/login', (req, res) => {
 
 app.get('/api/data', checkAuth, (req, res) => {
     res.json({
-        ...getDB(), 
-        botStatus, 
-        qr: lastQR, 
-        isConnected,
+        ...getDB(), botStatus, qr: lastQR, isConnected,
         backupPhone: getConfig().backupPhone || '',
         serverTime: nowRD().format('DD/MM/YYYY HH:mm:ss'),
-        timezone: TZ,
-        chromePath: process.env.PUPPETEER_EXECUTABLE_PATH || 'No encontrado'
+        timezone: TZ
     });
 });
 
@@ -774,13 +524,8 @@ app.post('/api/reminders', checkAuth, (req, res) => {
 
     console.log('📝 Recordatorio guardado:', name, '- Fecha:', date, '- Hora actual RD:', nowRD().format('YYYY-MM-DDTHH:mm'));
 
-    // Convertir id a número si es posible para asegurar que se use como índice
-    const idx = id && id !== "" && id !== null && id !== undefined && id !== "undefined" ? Number(id) : -1;
-    if (idx >= 0 && idx < db.reminders.length) {
-        db.reminders[idx] = data;
-    } else {
-        db.reminders.push(data);
-    }
+    if (id !== "" && id !== null && id !== undefined && id !== "undefined") db.reminders[id] = data;
+    else db.reminders.push(data);
     saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
@@ -861,12 +606,13 @@ app.post('/api/logout-wa', checkAuth, async (req, res) => {
         if (fs.existsSync(AUTH_PATH)) fs.rmSync(AUTH_PATH, { recursive: true, force: true });
         isConnected = false;
         botStatus = "Desconectado";
-        clientInitialized = false;
+        lastQRImage = null; // Limpiar QR
         const db = getDB();
         db.stats.replied = 0;
         db.stats.total = 0;
         saveDB(db);
         io.emit('data_update', db);
+        io.emit('qr_clear'); // Notificar a los clientes
         res.json({ ok: true });
         setTimeout(() => process.exit(0), 1000);
     } catch (e) { res.status(500).send(e.message); }
@@ -876,29 +622,12 @@ server.listen(config.port, '0.0.0.0', () => {
     console.log('🚀 GZMBOT ONLINE en puerto', config.port);
     console.log('🕐 Hora actual RD:', nowRD().format('DD/MM/YYYY HH:mm:ss'));
     console.log('📅 Próximo backup: 12:00 AM hora RD');
-    console.log('📱 Panel web disponible en http://localhost:' + config.port);
-});
-
-// Manejar cierre graceful
-process.on('SIGINT', async () => {
-    console.log('🛑 Cerrando aplicación...');
-    if (client) {
-        try {
-            await client.destroy();
-            console.log('✅ Cliente de WhatsApp cerrado');
-        } catch (e) {
-            console.error('Error cerrando cliente:', e.message);
-        }
-    }
-    process.exit(0);
 });
 APPEOF
 
-print_success "app.js creado"
-
-# ==================== INDEX.HTML (MODERNO CON CORRECCIONES) ====================
-print_step "CREANDO INTERFAZ WEB"
-
+# ----------------------------------------------------------------------
+# 8. FRONTEND (index.html) - CON TEXTO DE ESPERA Y QR ACTUALIZADO
+# ----------------------------------------------------------------------
 cat <<'HTMLEOF' > views/index.html
 <!DOCTYPE html>
 <html lang="es">
@@ -909,158 +638,275 @@ cat <<'HTMLEOF' > views/index.html
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #0a0a0f; color: #ffffff; font-family: 'Plus Jakarta Sans', sans-serif; }
-        .glass { background: rgba(20, 20, 30, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); border-radius: 24px; box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5); }
-        .glass-card { background: rgba(25, 25, 35, 0.8); border: 1px solid rgba(255,255,255,0.03); border-radius: 20px; transition: all 0.2s ease; }
-        .glass-card:hover { border-color: rgba(37, 99, 235, 0.3); transform: translateY(-2px); box-shadow: 0 20px 30px -10px rgba(37,99,235,0.2); }
-        .sidebar-item { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-radius: 18px; color: #a1a1aa; transition: all 0.3s; cursor: pointer; font-weight: 500; }
-        .sidebar-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
-        .sidebar-item.active { background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); color: #fff; box-shadow: 0 10px 20px -5px rgba(37, 99, 235, 0.5); }
-        .page { display: none; animation: fadeIn 0.3s ease-out; }
-        .page.active { display: block; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        input, select, textarea {
-            background: #1a1a24 !important; border: 1px solid #2a2a35 !important;
-            color: #fff !important; padding: 12px 16px !important; border-radius: 16px !important;
-            outline: none; width: 100%; font-size: 15px; transition: border 0.2s;
+        body {
+            background: #0a0a0f;
+            color: #f4f4f5;
+            font-family: 'Inter', sans-serif;
+            background-image: radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.03) 0%, transparent 50%);
         }
-        input:focus, textarea:focus { border-color: #2563eb !important; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 10px; }
-        .media-preview { max-width: 100px; max-height: 100px; border-radius: 12px; margin: 4px; object-fit: cover; border: 2px solid #2a2a35; }
+        .glass {
+            background: rgba(18, 18, 24, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        .glass-card {
+            background: rgba(24, 24, 32, 0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.02);
+            border-radius: 24px;
+            transition: transform 0.2s ease, border-color 0.2s;
+        }
+        .glass-card:hover {
+            border-color: rgba(37, 99, 235, 0.3);
+            transform: translateY(-2px);
+        }
+        .sidebar-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 14px;
+            color: #a1a1aa;
+            transition: all 0.2s;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .sidebar-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            color: #fff;
+        }
+        .sidebar-item.active {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+            box-shadow: 0 8px 20px -8px #2563eb80;
+        }
+        .page {
+            display: none;
+            animation: fadeIn 0.3s ease-out;
+        }
+        .page.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        input, select, textarea {
+            background: #0f0f13 !important;
+            border: 1px solid #27272a !important;
+            color: #fff !important;
+            padding: 12px 16px !important;
+            border-radius: 14px !important;
+            outline: none;
+            width: 100%;
+            font-size: 15px;
+            transition: border 0.2s;
+        }
+        input:focus, textarea:focus, select:focus {
+            border-color: #2563eb !important;
+        }
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3f3f46;
+            border-radius: 10px;
+        }
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            line-height: 1;
+            background: linear-gradient(135deg, #fff, #a5b4fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .badge {
+            padding: 4px 10px;
+            border-radius: 30px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+        .reminder-item, .learning-item {
+            background: rgba(39, 39, 45, 0.5);
+            border-radius: 16px;
+            padding: 14px;
+            border: 1px solid rgba(255,255,255,0.02);
+            margin-bottom: 8px;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #60a5fa, #ffffff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .media-preview { max-width: 100px; max-height: 100px; border-radius: 12px; margin: 4px; object-fit: cover; }
         .media-type-selector { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-        .media-type-btn { padding: 10px 18px; background: #1a1a24; border: 1px solid #2a2a35; border-radius: 30px; cursor: pointer; transition: all 0.3s; color: #a1a1aa; font-weight: 500; display: flex; align-items: center; gap: 6px; }
-        .media-type-btn.active { background: #2563eb; border-color: #2563eb; color: #fff; }
-        .media-preview-container { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+        .media-type-btn { padding: 8px 16px; background: #0f0f13; border: 1px solid #27272a; border-radius: 10px; cursor: pointer; transition: all 0.3s; color: #fff; font-size: 14px; }
+        .media-type-btn.active { background: #2563eb; border-color: #2563eb; }
+        .media-preview-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
         .media-item { position: relative; }
-        .media-remove { position: absolute; top: -6px; right: -6px; background: #ef4444; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; font-weight: bold; border: 2px solid #1a1a24; }
-        .btn { padding: 12px 24px; border-radius: 30px; font-weight: 600; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
-        .btn-primary { background: #2563eb; color: #fff; box-shadow: 0 8px 16px -4px rgba(37,99,235,0.3); }
-        .btn-primary:hover { background: #1e4fcf; transform: translateY(-2px); }
-        .btn-success { background: #10b981; color: #fff; box-shadow: 0 8px 16px -4px rgba(16,185,129,0.3); }
-        .btn-success:hover { background: #0ea271; transform: translateY(-2px); }
-        .btn-danger { background: #ef4444; color: #fff; box-shadow: 0 8px 16px -4px rgba(239,68,68,0.3); }
-        .btn-danger:hover { background: #dc2626; transform: translateY(-2px); }
-        .btn-warning { background: #f59e0b; color: #fff; box-shadow: 0 8px 16px -4px rgba(245,158,11,0.3); }
-        .btn-warning:hover { background: #d97706; transform: translateY(-2px); }
-        .btn-outline { background: transparent; border: 1px solid #2a2a35; color: #a1a1aa; }
-        .btn-outline:hover { border-color: #2563eb; color: #fff; }
-        /* Clase para preservar saltos de línea en mensajes */
-        .preserve-lines { white-space: pre-wrap; }
+        .media-remove { position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 12px; font-weight: bold; }
+        .preserve-whitespace { white-space: pre-wrap; word-break: break-word; }
     </style>
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r border-white/5 -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-6 overflow-y-auto">
-        <div class="flex items-center gap-3 mb-10 px-2">
-            <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-800 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
-                <i data-lucide="bot" class="text-white w-6 h-6"></i>
+    <!-- SIDEBAR -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r border-white/5 -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-5 overflow-y-auto">
+        <div class="flex items-center gap-3 mb-8 px-3">
+            <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-500 rounded-xl flex items-center justify-center shadow-xl flex-shrink-0">
+                <i data-lucide="bot" class="text-white w-5 h-5"></i>
             </div>
-            <span class="text-2xl font-extrabold tracking-tighter bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">GZMBOT</span>
+            <span class="text-xl font-extrabold tracking-tight gradient-text">GZMBOT</span>
         </div>
         <nav class="space-y-1 flex-1">
-            <div onclick="nav('dash')" id="n-dash" class="sidebar-item active"><i data-lucide="layout-grid" class="w-5 h-5"></i><span>Dashboard</span></div>
-            <div onclick="nav('conn')" id="n-conn" class="sidebar-item"><i data-lucide="qr-code" class="w-5 h-5"></i><span>Conexión</span></div>
-            <div onclick="nav('train')" id="n-train" class="sidebar-item"><i data-lucide="message-square" class="w-5 h-5"></i><span>Respuestas</span></div>
-            <div onclick="nav('learn')" id="n-learn" class="sidebar-item"><i data-lucide="brain" class="w-5 h-5"></i><span>Aprender</span></div>
-            <div onclick="nav('rem')" id="n-rem" class="sidebar-item"><i data-lucide="bell" class="w-5 h-5"></i><span>Recordatorios</span></div>
-            <div onclick="nav('excl')" id="n-excl" class="sidebar-item"><i data-lucide="shield-off" class="w-5 h-5"></i><span>Excluidos</span></div>
-            <div onclick="nav('config')" id="n-config" class="sidebar-item"><i data-lucide="settings" class="w-5 h-5"></i><span>Ajustes</span></div>
+            <div onclick="nav('dash'); if(window.innerWidth<1024) toggleSidebar()" id="n-dash" class="sidebar-item active"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></div>
+            <div onclick="nav('conn'); if(window.innerWidth<1024) toggleSidebar()" id="n-conn" class="sidebar-item"><i data-lucide="qr-code"></i><span>Conexión</span></div>
+            <div onclick="nav('train'); if(window.innerWidth<1024) toggleSidebar()" id="n-train" class="sidebar-item"><i data-lucide="message-square"></i><span>Respuestas</span></div>
+            <div onclick="nav('learn'); if(window.innerWidth<1024) toggleSidebar()" id="n-learn" class="sidebar-item"><i data-lucide="brain"></i><span>Aprender</span></div>
+            <div onclick="nav('rem'); if(window.innerWidth<1024) toggleSidebar()" id="n-rem" class="sidebar-item"><i data-lucide="bell"></i><span>Recordatorios</span></div>
+            <div onclick="nav('excl'); if(window.innerWidth<1024) toggleSidebar()" id="n-excl" class="sidebar-item"><i data-lucide="shield-off"></i><span>Excluidos</span></div>
+            <div onclick="nav('config'); if(window.innerWidth<1024) toggleSidebar()" id="n-config" class="sidebar-item"><i data-lucide="settings"></i><span>Ajustes</span></div>
         </nav>
-        <button onclick="location.href='/login'" class="sidebar-item text-red-400 hover:bg-red-500/10 hover:text-red-400 mt-auto">
-            <i data-lucide="power" class="w-5 h-5"></i><span>Salir del Panel</span>
+        <button onclick="location.href='/login'" class="sidebar-item text-red-400 hover:bg-red-500/10 mt-6">
+            <i data-lucide="log-out"></i><span>Salir</span>
         </button>
     </aside>
 
-    <main class="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#0a0a0f]">
-        <header class="lg:hidden p-4 glass flex justify-between items-center flex-shrink-0 mx-4 mt-4 rounded-2xl">
-            <span class="font-bold text-lg">GZMBOT</span>
-            <button onclick="toggleSidebar()" class="p-2 hover:bg-white/10 rounded-xl transition"><i data-lucide="menu"></i></button>
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <header class="lg:hidden p-4 glass border-b border-white/5 flex justify-between items-center flex-shrink-0">
+            <span class="font-bold text-lg gradient-text">GZMBOT</span>
+            <button onclick="toggleSidebar()" class="p-2 text-zinc-400 hover:text-white">
+                <i data-lucide="menu"></i>
+            </button>
         </header>
 
-        <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
-            <!-- DASHBOARD -->
+            <!-- ========== DASHBOARD ========== -->
             <div id="p-dash" class="page active">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-                    <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Dashboard</h1>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                    <h1 class="text-3xl font-bold gradient-text">Panel de Control</h1>
                     <div class="flex items-center gap-4">
                         <div id="server-clock" class="text-sm text-zinc-500 font-mono bg-white/5 px-4 py-2 rounded-full"></div>
-                        <div class="px-4 py-2 glass rounded-full flex items-center gap-2">
+                        <div class="px-4 py-2 glass-card flex items-center gap-2">
                             <div id="dot" class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></div>
-                            <span id="bot-status" class="text-xs font-bold uppercase tracking-widest text-zinc-400">Desconectado</span>
+                            <span id="bot-status" class="text-xs font-semibold uppercase tracking-wider text-zinc-400">Desconectado</span>
                         </div>
                     </div>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="glass-card p-8">
-                        <div class="flex items-center gap-4 mb-4">
-                            <div class="w-12 h-12 bg-blue-500/20 rounded-2xl flex items-center justify-center">
-                                <i data-lucide="message-circle" class="w-6 h-6 text-blue-500"></i>
-                            </div>
-                            <p class="text-zinc-400 font-medium">Bot ha respondido</p>
+
+                <!-- Tarjetas de estadísticas principales -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
+                    <div class="glass-card p-6 flex items-center gap-4">
+                        <div class="w-14 h-14 rounded-2xl bg-blue-500/20 flex items-center justify-center">
+                            <i data-lucide="message-circle" class="w-7 h-7 text-blue-400"></i>
                         </div>
-                        <h2 id="s-replied" class="text-5xl md:text-6xl font-black text-blue-500">0</h2>
-                    </div>
-                    <div class="glass-card p-8">
-                        <div class="flex items-center gap-4 mb-4">
-                            <div class="w-12 h-12 bg-zinc-500/20 rounded-2xl flex items-center justify-center">
-                                <i data-lucide="users" class="w-6 h-6 text-zinc-400"></i>
-                            </div>
-                            <p class="text-zinc-400 font-medium">Tráfico Total</p>
+                        <div>
+                            <p class="text-zinc-500 text-sm font-medium">Respondidas</p>
+                            <h2 id="s-replied" class="stat-value">0</h2>
                         </div>
-                        <h2 id="s-total" class="text-5xl md:text-6xl font-black text-white">0</h2>
                     </div>
+                    <div class="glass-card p-6 flex items-center gap-4">
+                        <div class="w-14 h-14 rounded-2xl bg-purple-500/20 flex items-center justify-center">
+                            <i data-lucide="users" class="w-7 h-7 text-purple-400"></i>
+                        </div>
+                        <div>
+                            <p class="text-zinc-500 text-sm font-medium">Total mensajes</p>
+                            <h2 id="s-total" class="stat-value">0</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Próximos recordatorios -->
+                <div class="glass-card p-6 mb-8">
+                    <div class="flex items-center gap-3 mb-4">
+                        <i data-lucide="bell" class="w-5 h-5 text-emerald-400"></i>
+                        <h3 class="font-semibold text-lg gradient-text">Próximos recordatorios</h3>
+                        <span class="badge bg-emerald-500/10 text-emerald-400 ml-auto">HOY</span>
+                    </div>
+                    <div id="upcoming-reminders-list" class="space-y-2">
+                        <div class="text-zinc-500 text-sm py-4 text-center">Cargando...</div>
+                    </div>
+                    <button onclick="nav('rem')" class="mt-3 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1">
+                        Ver todos <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <!-- Últimos mensajes sin respuesta (ocupa toda la fila) -->
+                <div class="glass-card p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <i data-lucide="brain" class="w-5 h-5 text-amber-400"></i>
+                        <h3 class="font-semibold text-lg gradient-text">Últimos mensajes sin respuesta</h3>
+                    </div>
+                    <div id="recent-learning-list" class="space-y-2 max-h-80 overflow-y-auto pr-2">
+                        <div class="text-zinc-500 text-sm py-4 text-center">No hay datos</div>
+                    </div>
+                    <button onclick="nav('learn')" class="mt-3 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1">
+                        Ir a aprender <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
                 </div>
             </div>
 
-            <!-- CONEXIÓN -->
+            <!-- ========== CONEXIÓN ========== -->
             <div id="p-conn" class="page">
-                <div class="max-w-lg mx-auto">
-                    <div class="glass-card p-8 text-center">
-                        <div id="qr-container" class="bg-white p-4 rounded-2xl inline-block mb-6">
-                            <div id="qr-img" class="w-64 h-64 flex items-center justify-center text-black font-bold text-sm">Esperando...</div>
+                <h2 class="text-2xl font-bold gradient-text mb-6">Conexión WhatsApp</h2>
+                <div class="max-w-md mx-auto glass-card p-8 text-center">
+                    <div id="qr-container" class="bg-white p-4 rounded-3xl inline-block mb-6">
+                        <div id="qr-img" class="w-64 h-64 flex items-center justify-center text-black font-bold">
+                            <span class="text-sm text-gray-500">Esperando código QR...</span>
                         </div>
-                        <div id="connected-container" class="hidden mb-6">
-                            <div class="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>
-                            </div>
-                            <h2 class="text-2xl font-bold text-green-500 mb-2">WhatsApp Vinculado</h2>
-                            <p class="text-zinc-400">El bot está conectado y funcionando.</p>
-                        </div>
-                        <h2 class="text-2xl font-bold mb-2">Vincular WhatsApp</h2>
-                        <p class="text-zinc-500 text-sm mb-6">Escanea el código QR con tu WhatsApp</p>
-                        <button id="btn-logout-wa" onclick="logoutWA()" class="hidden btn btn-danger w-full">
-                            <i data-lucide="unlink" class="w-5 h-5"></i> Desvincular
-                        </button>
                     </div>
+                    <div id="connected-container" class="hidden mb-6">
+                        <div class="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>
+                        </div>
+                        <h2 class="text-2xl font-bold text-green-500 mb-2">WhatsApp Vinculado</h2>
+                        <p class="text-zinc-500">El bot está conectado y funcionando.</p>
+                    </div>
+                    <h2 class="text-xl font-bold mb-2">Escanear código QR</h2>
+                    <p class="text-zinc-500 text-sm mb-6">Usa WhatsApp para vincular el bot.</p>
+                    <button id="btn-logout-wa" onclick="logoutWA()" class="hidden w-full py-4 bg-red-500/10 text-red-500 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition">
+                        <i data-lucide="unlink" class="inline w-4 h-4 mr-2"></i>DESVINCULAR
+                    </button>
                 </div>
             </div>
 
-            <!-- RESPUESTAS -->
+            <!-- ========== RESPUESTAS ========== -->
             <div id="p-train" class="page">
-                <div class="flex flex-wrap gap-3 mb-6">
-                    <button onclick="downloadTemplate()" class="btn btn-outline"><i data-lucide="download" class="w-5 h-5"></i> Plantilla</button>
-                    <button onclick="document.getElementById('import-file').click()" class="btn btn-success"><i data-lucide="upload" class="w-5 h-5"></i> Importar</button>
-                    <button onclick="exportTraining()" class="btn btn-warning"><i data-lucide="file-text" class="w-5 h-5"></i> Exportar</button>
+                <h2 class="text-2xl font-bold gradient-text mb-4">Gestión de Respuestas</h2>
+                <div class="mb-4 flex gap-2 flex-wrap">
+                    <button onclick="downloadTemplate()" class="px-4 py-2 bg-purple-600 rounded-xl font-bold flex items-center gap-2 hover:bg-purple-700 transition text-sm">
+                        <i data-lucide="download" class="w-4 h-4"></i>Plantilla
+                    </button>
+                    <button onclick="document.getElementById('import-file').click()" class="px-4 py-2 bg-green-600 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition text-sm">
+                        <i data-lucide="upload" class="w-4 h-4"></i>Importar
+                    </button>
+                    <button onclick="exportTraining()" class="px-4 py-2 bg-orange-600 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-700 transition text-sm">
+                        <i data-lucide="file-text" class="w-4 h-4"></i>Exportar
+                    </button>
                     <input type="file" id="import-file" accept=".txt" class="hidden" onchange="importTraining(this)">
                 </div>
-                <div class="grid lg:grid-cols-3 gap-6">
-                    <div class="lg:col-span-1 glass-card p-6 h-fit">
-                        <h3 class="font-bold text-lg mb-4 flex items-center gap-2"><i data-lucide="plus-circle" class="text-blue-500"></i> Nueva Regla</h3>
+                <div class="grid lg:grid-cols-3 gap-4 sm:gap-8">
+                    <div class="lg:col-span-1 glass p-4 sm:p-6 rounded-2xl h-fit">
+                        <h3 class="font-bold mb-4 flex items-center gap-2"><i data-lucide="plus-circle" class="text-blue-500"></i> Nueva Regla</h3>
                         <form id="train-form" enctype="multipart/form-data" onsubmit="saveTrain(event)">
                             <input type="hidden" id="t-id">
                             <input type="text" id="t-key" placeholder="Cuando digan..." class="mb-3" required>
-                            <textarea id="t-res" placeholder="Responder..." class="h-32 mb-4" required></textarea>
+                            <textarea id="t-res" placeholder="Responder..." class="h-28 mb-4" required></textarea>
                             <div class="mb-4">
-                                <label class="block text-sm text-zinc-400 mb-2">Tipo de respuesta:</label>
+                                <label class="block text-sm text-zinc-400 mb-2">Tipo:</label>
                                 <div class="media-type-selector">
-                                    <button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="w-4 h-4"></i> Texto</button>
-                                    <button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="w-4 h-4"></i> Imagen</button>
-                                    <button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="w-4 h-4"></i> Video</button>
+                                    <button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="inline w-4 h-4"></i> Texto</button>
+                                    <button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="inline w-4 h-4"></i> Imagen</button>
+                                    <button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="inline w-4 h-4"></i> Video</button>
                                 </div>
                             </div>
                             <div id="media-upload" class="hidden mb-4">
@@ -1068,90 +914,90 @@ cat <<'HTMLEOF' > views/index.html
                                 <input type="file" id="t-media" accept="image/*,video/*" multiple>
                                 <div id="media-preview" class="media-preview-container"></div>
                             </div>
-                            <button type="submit" class="btn btn-primary w-full">Guardar Regla</button>
+                            <button type="submit" class="w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Guardar</button>
                         </form>
                     </div>
-                    <div id="l-train" class="lg:col-span-2 space-y-4"></div>
+                    <div id="l-train" class="lg:col-span-2 space-y-3"></div>
                 </div>
             </div>
 
-            <!-- APRENDER -->
+            <!-- ========== APRENDER ========== -->
             <div id="p-learn" class="page">
-                <h2 class="text-2xl font-bold mb-2">Bandeja de Aprendizaje</h2>
-                <p class="text-zinc-500 text-sm mb-6">Mensajes que el bot no supo responder</p>
+                <h2 class="text-2xl font-bold gradient-text mb-4">Bandeja de Aprendizaje</h2>
+                <p class="text-zinc-500 text-sm mb-4">Conversaciones que el bot no supo responder</p>
                 <div id="l-learn" class="space-y-3"></div>
             </div>
 
-            <!-- RECORDATORIOS -->
+            <!-- ========== RECORDATORIOS ========== -->
             <div id="p-rem" class="page">
-                <div class="glass-card p-6 mb-8">
+                <h2 class="text-2xl font-bold gradient-text mb-4">Recordatorios</h2>
+                <div class="glass p-4 sm:p-8 rounded-2xl mb-6">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="font-bold text-xl">Programar Recordatorio</h3>
-                        <span id="rem-clock" class="text-sm text-zinc-500 font-mono"></span>
+                        <h3 class="font-bold text-base sm:text-lg">Programar Recordatorio</h3>
+                        <span id="rem-clock" class="text-xs text-zinc-500 font-mono"></span>
                     </div>
-                    <p class="text-xs text-zinc-500 mb-4">⏰ Los recordatorios usan hora de República Dominicana (AST/UTC-4). Los saltos de línea se conservan.</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <p class="text-xs text-zinc-500 mb-4">⏰ Hora República Dominicana (UTC-4)</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                         <input type="hidden" id="r-id">
-                        <input type="text" id="r-name" placeholder="Nombre del cliente">
+                        <input type="text" id="r-name" placeholder="Nombre">
                         <input type="text" id="r-phone" placeholder="Número (ej: 18091234567)">
-                        <textarea id="r-msg" placeholder="Mensaje a enviar (puedes usar saltos de línea)" class="md:col-span-2 h-24"></textarea>
-                        <select id="r-freq">
-                            <option>Una vez</option>
-                            <option>Diario</option>
-                            <option>Semanal</option>
-                            <option>Mensual</option>
-                            <option>Anual</option>
-                        </select>
+                        <textarea id="r-msg" placeholder="Mensaje" rows="3" class="sm:col-span-2 lg:col-span-2 resize-none"></textarea>
+                        <select id="r-freq"><option>Una vez</option><option>Diario</option><option>Semanal</option><option>Mensual</option><option>Anual</option></select>
                         <input type="datetime-local" id="r-date">
                     </div>
-                    <button onclick="saveRem()" class="btn btn-success mt-6">Programar Recordatorio</button>
+                    <button onclick="saveRem()" class="mt-4 w-full sm:w-auto px-8 py-3 bg-emerald-600 rounded-2xl font-bold hover:bg-emerald-700 transition">Programar</button>
                 </div>
                 <div id="l-rem" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
             </div>
 
-            <!-- EXCLUIDOS -->
+            <!-- ========== EXCLUIDOS ========== -->
             <div id="p-excl" class="page">
-                <div class="max-w-2xl mx-auto">
-                    <div class="glass-card p-6">
-                        <h2 class="text-xl font-bold mb-4 flex items-center gap-2"><i data-lucide="shield-off" class="text-red-500"></i> Números Bloqueados</h2>
-                        <div class="flex flex-col sm:flex-row gap-2 mb-6">
-                            <input type="text" id="e-name" placeholder="Nombre" class="flex-1">
-                            <input type="text" id="e-phone" placeholder="Número" class="flex-1">
-                            <button onclick="saveExcl()" class="btn btn-primary whitespace-nowrap">Añadir a Bloqueados</button>
-                        </div>
-                        <div id="l-excl" class="space-y-2"></div>
+                <h2 class="text-2xl font-bold gradient-text mb-4">Números Excluidos</h2>
+                <div class="w-full max-w-xl mx-auto glass p-4 sm:p-8 rounded-2xl">
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input type="text" id="e-name" placeholder="Nombre" class="flex-1">
+                        <input type="text" id="e-phone" placeholder="Número" class="flex-1">
+                        <button onclick="saveExcl()" class="bg-white text-black px-6 py-3 font-bold rounded-xl hover:bg-zinc-200 transition whitespace-nowrap">Añadir</button>
                     </div>
+                    <div id="l-excl" class="mt-6 space-y-2"></div>
                 </div>
             </div>
 
-            <!-- AJUSTES -->
+            <!-- ========== AJUSTES ========== -->
             <div id="p-config" class="page">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl mx-auto">
-                    <div class="glass-card p-8">
-                        <h2 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="key" class="text-blue-500"></i> Credenciales</h2>
-                        <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-4">
+                <h2 class="text-2xl font-bold gradient-text mb-4">Configuración</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 max-w-4xl mx-auto">
+                    <div class="glass p-5 sm:p-10 rounded-2xl">
+                        <h2 class="text-xl sm:text-2xl font-bold mb-6">Credenciales de Acceso</h2>
+                        <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-3">
                         <input type="password" id="conf-pass" placeholder="Nueva Contraseña" class="mb-6">
-                        <button onclick="saveCredentials()" class="btn btn-primary w-full">Actualizar Seguridad</button>
+                        <button onclick="saveCredentials()" class="w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Actualizar</button>
                     </div>
-                    <div class="glass-card p-8">
-                        <h2 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="shield" class="text-emerald-500"></i> Copias de Seguridad</h2>
-                        <div class="mb-6">
-                            <p class="text-sm text-zinc-400 mb-2">Número para recibir backups por WhatsApp:</p>
+                    <div class="glass p-5 sm:p-10 rounded-2xl">
+                        <h2 class="text-xl sm:text-2xl font-bold mb-4">Copias de Seguridad</h2>
+                        <div class="mb-5">
+                            <p class="text-xs sm:text-sm text-zinc-400 mb-2">Número para backups:</p>
                             <div class="flex gap-2">
                                 <input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="flex-1">
-                                <button onclick="saveBackupPhone()" class="btn btn-success flex items-center gap-1">
-                                    <i data-lucide="save" class="w-5 h-5"></i> Guardar
+                                <button onclick="saveBackupPhone()" class="px-4 py-3 bg-emerald-600 rounded-xl font-bold hover:bg-emerald-700 transition flex items-center gap-1 text-sm whitespace-nowrap">
+                                    <i data-lucide="save" class="w-4 h-4"></i> Guardar
                                 </button>
                             </div>
                             <p id="phone-saved-msg" class="text-xs mt-2 hidden"></p>
                         </div>
-                        <div class="space-y-3">
-                            <button onclick="downloadBackup()" class="btn btn-outline w-full"><i data-lucide="download" class="w-5 h-5"></i> Descargar Backup</button>
-                            <button onclick="sendBackupManually()" class="btn btn-primary w-full"><i data-lucide="send" class="w-5 h-5"></i> Enviar a WhatsApp</button>
-                            <button onclick="document.getElementById('restore-file').click()" class="btn btn-warning w-full"><i data-lucide="upload" class="w-5 h-5"></i> Restaurar Backup</button>
+                        <div class="space-y-2">
+                            <button onclick="downloadBackup()" class="w-full py-3 bg-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition text-sm">
+                                <i data-lucide="download" class="w-4 h-4"></i>Descargar Backup
+                            </button>
+                            <button onclick="sendBackupManually()" class="w-full py-3 bg-blue-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition text-sm">
+                                <i data-lucide="send" class="w-4 h-4"></i>Enviar a WhatsApp
+                            </button>
+                            <button onclick="document.getElementById('restore-file').click()" class="w-full py-3 bg-orange-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-orange-700 transition text-sm">
+                                <i data-lucide="upload" class="w-4 h-4"></i>Restaurar Backup
+                            </button>
                             <input type="file" id="restore-file" accept=".json" class="hidden" onchange="restoreBackup(this)">
                         </div>
-                        <p class="text-xs text-zinc-500 mt-4">💡 Backup automático diario a las 12:00 AM hora RD.</p>
+                        <p class="text-xs text-zinc-500 mt-4">💡 Backup diario 12:00 AM hora RD.</p>
                     </div>
                 </div>
             </div>
@@ -1166,12 +1012,11 @@ cat <<'HTMLEOF' > views/index.html
 
         function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); }
 
-        function nav(id, noToggle = false) {
+        function nav(id) {
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
             document.getElementById('p-'+id).classList.add('active');
             document.getElementById('n-'+id).classList.add('active');
-            if (!noToggle && window.innerWidth < 1024) toggleSidebar();
             lucide.createIcons();
         }
 
@@ -1204,7 +1049,7 @@ cat <<'HTMLEOF' > views/index.html
             lucide.createIcons();
         }
 
-        document.getElementById('t-media').addEventListener('change', function(e) {
+        document.getElementById('t-media')?.addEventListener('change', function(e) {
             const files = Array.from(e.target.files);
             if (files.length > 10) { alert('Máximo 10'); return; }
             selectedFiles = files;
@@ -1234,6 +1079,22 @@ cat <<'HTMLEOF' > views/index.html
             document.getElementById('t-media').dispatchEvent(new Event('change'));
         }
 
+        // Mostrar QR en el contenedor
+        function showQR(url) {
+            const qrImg = document.getElementById('qr-img');
+            if (qrImg) {
+                qrImg.innerHTML = '<img src="'+url+'" class="w-full">';
+            }
+        }
+
+        // Limpiar QR y mostrar texto de espera
+        function clearQR() {
+            const qrImg = document.getElementById('qr-img');
+            if (qrImg) {
+                qrImg.innerHTML = '<span class="text-sm text-gray-500">Esperando código QR...</span>';
+            }
+        }
+
         socket.on('status_update', s => {
             document.getElementById('bot-status').innerText = s;
             document.getElementById('dot').className = s === 'Conectado'
@@ -1246,6 +1107,8 @@ cat <<'HTMLEOF' > views/index.html
                 document.getElementById('qr-container').classList.add('hidden');
                 document.getElementById('connected-container').classList.remove('hidden');
                 document.getElementById('btn-logout-wa').classList.remove('hidden');
+                // Limpiar QR por si acaso
+                clearQR();
             } else {
                 document.getElementById('qr-container').classList.remove('hidden');
                 document.getElementById('connected-container').classList.add('hidden');
@@ -1255,7 +1118,11 @@ cat <<'HTMLEOF' > views/index.html
         });
 
         socket.on('qr_update', url => {
-            document.getElementById('qr-img').innerHTML = '<img src="'+url+'" class="w-full">';
+            showQR(url);
+        });
+
+        socket.on('qr_clear', () => {
+            clearQR();
         });
 
         socket.on('data_update', data => { db = data; render(); });
@@ -1273,9 +1140,11 @@ cat <<'HTMLEOF' > views/index.html
                     document.getElementById('btn-logout-wa').classList.remove('hidden');
                     document.getElementById('bot-status').innerText = 'Conectado';
                     document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-green-500';
+                    clearQR(); // Asegurar que no haya QR
                 } else {
                     document.getElementById('bot-status').innerText = data.botStatus || 'Desconectado';
                     document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse';
+                    // No mostramos QR aquí porque se maneja por socket
                 }
 
                 document.getElementById('conf-backup-phone').value = data.backupPhone || '';
@@ -1306,76 +1175,102 @@ cat <<'HTMLEOF' > views/index.html
             } catch(e) { return dateStr; }
         }
 
+        function currentRDTimestamp() {
+            return Date.now() - (4 * 60 * 60 * 1000);
+        }
+
         function render() {
             document.getElementById('s-replied').innerText = db.stats ? db.stats.replied : 0;
             document.getElementById('s-total').innerText = db.stats ? db.stats.total : 0;
 
-            document.getElementById('l-train').innerHTML = (db.training || []).map((t,i) =>
-                `<div class="glass-card p-5">
-                    <div class="flex justify-between items-start gap-3">
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2 mb-1 flex-wrap">
-                                <span class="text-blue-400 font-semibold">P:</span>
-                                <span class="font-medium break-all">${esc(t.key)}</span>
-                                ${t.mediaPaths && t.mediaPaths.length > 0 ? `<span class="text-xs bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full">${t.mediaPaths.length} archivo(s)</span>` : ''}
-                            </div>
-                            <p class="text-sm text-zinc-300 break-all whitespace-pre-wrap">${esc(t.response)}</p>
+            // Próximos recordatorios
+            const nowTS = currentRDTimestamp();
+            const upcoming = (db.reminders || [])
+                .map((r, index) => ({ ...r, index }))
+                .filter(r => {
+                    try {
+                        const dateParts = r.date.split('T');
+                        const [y, m, d] = dateParts[0].split('-').map(Number);
+                        const [h, min] = dateParts[1].split(':').map(Number);
+                        const ts = Date.UTC(y, m-1, d, h+4, min);
+                        return ts > nowTS;
+                    } catch { return false; }
+                })
+                .sort((a, b) => {
+                    try {
+                        const aParts = a.date.split('T');
+                        const bParts = b.date.split('T');
+                        const aTs = Date.UTC(...aParts[0].split('-').map(Number), ...aParts[1].split(':').map((v,i)=> i===0?Number(v)+4:Number(v)));
+                        const bTs = Date.UTC(...bParts[0].split('-').map(Number), ...bParts[1].split(':').map((v,i)=> i===0?Number(v)+4:Number(v)));
+                        return aTs - bTs;
+                    } catch { return 0; }
+                })
+                .slice(0, 5);
+
+            const upcomingEl = document.getElementById('upcoming-reminders-list');
+            if (upcoming.length === 0) {
+                upcomingEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">No hay recordatorios próximos</div>';
+            } else {
+                upcomingEl.innerHTML = upcoming.map(r => `
+                    <div class="reminder-item flex justify-between items-center">
+                        <div>
+                            <div class="font-medium">${esc(r.name)}</div>
+                            <div class="text-xs text-zinc-500">📱 ${esc(r.phone)}</div>
                         </div>
-                        <div class="flex gap-1">
-                            <button onclick="editT(${i})" class="p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-xl transition"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
-                            <button onclick="delT(${i})" class="p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        <div class="text-right">
+                            <div class="text-sm text-emerald-400">${formatReminderDate(r.date)}</div>
+                            <span class="badge bg-blue-500/10 text-blue-400">${r.freq}</span>
                         </div>
                     </div>
-                    ${t.mediaPaths && t.mediaPaths.length > 0 ? `
-                    <div class="media-preview-container mt-3">
-                        ${t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? 
-                            `<img src="/${p}" class="media-preview">` : 
-                            `<video src="/${p}" class="media-preview" controls></video>`).join('')}
-                    </div>` : ''}
-                </div>`
+                `).join('');
+            }
+
+            // Últimos aprendizajes
+            const recentLearn = (db.learning || []).slice(-5).reverse();
+            const learnEl = document.getElementById('recent-learning-list');
+            if (recentLearn.length === 0) {
+                learnEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">No hay mensajes nuevos</div>';
+            } else {
+                learnEl.innerHTML = recentLearn.map(l => `
+                    <div class="learning-item">
+                        <div class="flex justify-between items-start">
+                            <span class="text-xs text-zinc-500">${l.date} · ${l.from}</span>
+                            <button onclick="useLFromDashboard('${esc(l.text)}')" class="text-blue-400 hover:text-blue-300 text-xs font-medium">Usar</button>
+                        </div>
+                        <p class="text-sm mt-1 break-all">${esc(l.text)}</p>
+                    </div>
+                `).join('');
+            }
+
+            // Respuestas entrenadas
+            document.getElementById('l-train').innerHTML = (db.training || []).map((t,i) =>
+                '<div class="glass p-4 rounded-2xl"><div class="flex justify-between items-start mb-2 gap-2"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1 flex-wrap"><b class="text-blue-500 text-sm">P:</b><span class="text-sm break-all">'+esc(t.key)+'</span>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded">'+t.mediaPaths.length+' ARCHIVO(S)</span>' : '')+'</div><span class="text-xs sm:text-sm text-zinc-400 break-all">'+esc(t.response)+'</span></div><div class="flex gap-1 flex-shrink-0"><button onclick="editT('+i+')" class="p-2 text-zinc-500 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delT('+i+')" class="p-2 text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<div class="media-preview-container">'+t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? '<img src="/'+p+'" class="media-preview">' : '<video src="/'+p+'" class="media-preview" controls></video>').join('')+'</div>' : '')+'</div>'
             ).join('');
 
+            // Aprendizaje completo
             document.getElementById('l-learn').innerHTML = (!db.learning || db.learning.length === 0)
-                ? '<div class="glass-card p-8 text-center text-zinc-500">No hay conversaciones nuevas</div>'
+                ? '<div class="glass p-6 rounded-2xl text-center text-zinc-500">No hay conversaciones nuevas</div>'
                 : db.learning.map((l,i) =>
-                    `<div class="glass-card p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                        <div class="min-w-0 flex-1">
-                            <span class="text-xs text-zinc-500">${l.date} - ${l.from}</span>
-                            <p class="font-medium break-all whitespace-pre-wrap">${esc(l.text)}</p>
-                        </div>
-                        <div class="flex gap-2">
-                            <button onclick="useL(${i})" class="btn btn-primary text-sm py-2 px-4">Usar</button>
-                            <button onclick="delL(${i})" class="p-2 text-red-400 hover:bg-red-500/10 rounded-xl"><i data-lucide="x" class="w-5 h-5"></i></button>
-                        </div>
-                    </div>`
+                    '<div class="glass p-3 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"><div class="min-w-0 flex-1"><small class="text-zinc-500 text-xs">'+l.date+' - '+l.from+'</small><br><b class="text-sm break-all">'+esc(l.text)+'</b>'+(l.hasMedia ? ' <span class="ml-1 text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded">MEDIA</span>' : '')+'</div><div class="flex gap-2 flex-shrink-0"><button onclick="useL('+i+')" class="bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold">Configurar</button><button onclick="delL('+i+')" class="text-red-500 p-2"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>'
                 ).join('');
 
+            // Recordatorios
             document.getElementById('l-rem').innerHTML = (db.reminders || []).map((r,i) =>
-                `<div class="glass-card p-5 border-l-4 border-emerald-500">
-                    <div class="flex justify-between items-start">
-                        <h3 class="font-bold text-lg">${esc(r.name)}</h3>
-                        <div class="flex gap-1">
-                            <button onclick="editR(${i})" class="p-2 text-zinc-400 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
-                            <button onclick="delR(${i})" class="p-2 text-red-400"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-                        </div>
-                    </div>
-                    <p class="text-sm text-zinc-400 mb-2">📱 ${esc(r.phone)}</p>
-                    <p class="text-sm text-zinc-300 mb-3 whitespace-pre-wrap">${esc(r.message)}</p>
-                    <div class="flex flex-wrap gap-2">
-                        <span class="text-xs font-bold bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full">${r.freq}</span>
-                        <span class="text-xs font-bold bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full">📅 ${formatReminderDate(r.date)}</span>
-                    </div>
-                </div>`
+                '<div class="glass p-4 rounded-2xl border-l-4 border-emerald-500"><div class="flex justify-between items-start mb-2"><b class="text-base">'+esc(r.name)+'</b><div class="flex gap-1"><button onclick="editR('+i+')" class="text-zinc-400 hover:text-white p-1"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delR('+i+')" class="text-red-500 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div><p class="text-xs text-zinc-400 mb-2">📱 '+esc(r.phone)+'</p><p class="text-xs text-zinc-400 mb-2 preserve-whitespace">'+esc(r.message)+'</p><div class="flex flex-wrap gap-2"><span class="text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded">'+r.freq+'</span><span class="text-[10px] font-bold uppercase bg-blue-500/10 text-blue-400 px-2 py-1 rounded">📅 '+formatReminderDate(r.date)+'</span></div></div>'
             ).join('');
 
+            // Excluidos
             document.getElementById('l-excl').innerHTML = (db.excluded || []).map((e,i) =>
-                `<div class="glass-card p-3 flex justify-between items-center">
-                    <span class="text-sm">${esc(e.name)} (${esc(e.phone)})</span>
-                    <button onclick="delE(${i})" class="text-red-400 hover:text-red-500 p-1"><i data-lucide="user-minus" class="w-5 h-5"></i></button>
-                </div>`
+                '<div class="glass p-3 rounded-xl flex justify-between items-center gap-2"><span class="text-sm break-all">'+esc(e.name)+' ('+esc(e.phone)+')</span><button onclick="delE('+i+')" class="text-red-500 flex-shrink-0 p-1"><i data-lucide="user-minus" class="w-4 h-4"></i></button></div>'
             ).join('');
 
             lucide.createIcons();
+        }
+
+        function useLFromDashboard(text) {
+            document.getElementById('t-key').value = text;
+            nav('train');
+            setTimeout(() => document.getElementById('t-res').focus(), 300);
         }
 
         async function saveTrain(e) {
@@ -1399,7 +1294,7 @@ cat <<'HTMLEOF' > views/index.html
         }
 
         async function delT(i) { if (confirm('¿Eliminar?')) { await fetch('/api/train/'+i, {method:'DELETE'}); load(); } }
-        function useL(i) { document.getElementById('t-key').value = db.learning[i].text; nav('train', true); setTimeout(() => document.getElementById('t-res').focus(), 300); }
+        function useL(i) { document.getElementById('t-key').value = db.learning[i].text; nav('train'); setTimeout(() => document.getElementById('t-res').focus(), 300); }
         async function delL(i) { await fetch('/api/learning/'+i, {method:'DELETE'}); load(); }
 
         async function saveRem() {
@@ -1420,12 +1315,9 @@ cat <<'HTMLEOF' > views/index.html
 
         function editR(i) {
             const r = db.reminders[i];
-            document.getElementById('r-id').value = i;
-            document.getElementById('r-name').value = r.name;
-            document.getElementById('r-phone').value = r.phone;
-            document.getElementById('r-msg').value = r.message; // El textarea mostrará saltos de línea
-            document.getElementById('r-freq').value = r.freq;
-            document.getElementById('r-date').value = r.date;
+            document.getElementById('r-id').value = i; document.getElementById('r-name').value = r.name;
+            document.getElementById('r-phone').value = r.phone; document.getElementById('r-msg').value = r.message;
+            document.getElementById('r-freq').value = r.freq; document.getElementById('r-date').value = r.date;
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
@@ -1506,30 +1398,38 @@ cat <<'HTMLEOF' > views/index.html
 </html>
 HTMLEOF
 
-# ==================== LOGIN.HTML (sin cambios) ====================
+# ===================== LOGIN =====================
 cat <<'LOGINEOF' > views/login.html
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>GZMBOT | Login</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;800&display=swap" rel="stylesheet">
     <style>
-        body { background: #0a0a0f; font-family: 'Plus Jakarta Sans', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 16px; }
-        .glass-card { background: rgba(20, 20, 30, 0.8); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.05); border-radius: 40px; padding: 40px; width: 100%; max-width: 420px; box-shadow: 0 30px 60px -20px rgba(0,0,0,0.8); }
-        .gradient-text { background: linear-gradient(135deg, #fff 0%, #94a3b8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        * { box-sizing: border-box; }
+        body { background: #0a0a0f; font-family: 'Inter', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 16px; background-image: radial-gradient(circle at 50% 50%, rgba(37,99,235,0.1) 0%, transparent 60%); }
+        .glow { position: absolute; width: 600px; height: 600px; background: radial-gradient(circle, rgba(37,99,235,0.15) 0%, transparent 70%); z-index: -1; }
+        .card { background: rgba(18,18,24,0.9); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.03); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        .gradient-text {
+            background: linear-gradient(135deg, #60a5fa, #ffffff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
     </style>
 </head>
 <body>
-    <div class="glass-card text-center">
-        <h1 class="text-4xl font-black mb-2 gradient-text">GZMBOT</h1>
-        <p class="text-blue-500 font-semibold text-xs uppercase tracking-[0.3em] mb-8">Administrative Panel</p>
-        <form onsubmit="login(event)" class="space-y-5">
-            <input type="text" id="u" placeholder="Usuario maestro" class="w-full p-4 bg-[#1a1a24] border border-[#2a2a35] rounded-2xl text-white outline-none focus:border-blue-600 transition" required>
-            <input type="password" id="p" placeholder="Contraseña" class="w-full p-4 bg-[#1a1a24] border border-[#2a2a35] rounded-2xl text-white outline-none focus:border-blue-600 transition" required>
-            <button type="submit" class="w-full py-4 bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl text-white font-bold hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-blue-600/20">ACCEDER AL PANEL</button>
+    <div class="glow"></div>
+    <div class="card p-8 sm:p-12 rounded-[2.5rem] sm:rounded-[3.5rem] w-full max-w-md shadow-2xl text-center">
+        <h1 class="text-3xl sm:text-4xl font-black mb-2 tracking-tight gradient-text">GZMBOT</h1>
+        <p class="text-blue-500 font-bold text-[10px] uppercase tracking-[0.3em] mb-8 sm:mb-10">Administrative Panel</p>
+        <form onsubmit="login(event)" class="space-y-4">
+            <input type="text" id="u" placeholder="Usuario maestro" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
+            <input type="password" id="p" placeholder="Contraseña" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
+            <button type="submit" class="w-full py-4 sm:py-5 bg-blue-600 rounded-2xl text-white font-black hover:scale-[1.02] active:scale-95 transition-all">ACCEDER AHORA</button>
         </form>
     </div>
     <script>
@@ -1544,104 +1444,41 @@ cat <<'LOGINEOF' > views/login.html
 </html>
 LOGINEOF
 
-print_success "Interfaz web creada"
+# ----------------------------------------------------------------------
+# 9. INSTALAR DEPENDENCIAS DE NODE Y CONFIGURAR PM2
+# ----------------------------------------------------------------------
+echo "📦 Instalando dependencias de Node.js (esto puede tomar unos minutos)..."
+cd $HOME/gzmbot
+npm install whatsapp-web.js qrcode express socket.io express-session puppeteer moment-timezone node-cron multer
 
-# ==================== INSTALAR DEPENDENCIAS NPM ====================
-print_step "INSTALANDO PAQUETES NPM"
+# Instalar PM2 globalmente y configurar
+sudo npm install -g pm2
+pm2 delete gzmbot 2>/dev/null
+pm2 start app.js --name gzmbot --env TZ=America/Santo_Domingo
+pm2 save
+pm2 startup
 
-npm install -g pm2 &> /dev/null && print_success "PM2 instalado globalmente"
+# ----------------------------------------------------------------------
+# 10. MOSTRAR INFORMACIÓN FINAL
+# ----------------------------------------------------------------------
+IP=$(curl -s ifconfig.me)
 
-cd $INSTALL_DIR
-npm install whatsapp-web.js qrcode express socket.io express-session puppeteer moment-timezone node-cron multer --omit=dev &> /dev/null && print_success "Dependencias Node.js instaladas"
-
-# ==================== CONFIGURAR PM2 ====================
-print_step "CONFIGURANDO PM2"
-
-# Crear archivo ecosystem
-cat <<EOF > ecosystem.config.js
-module.exports = {
-  apps: [{
-    name: 'gzmbot',
-    script: 'app.js',
-    cwd: '$INSTALL_DIR',
-    env: {
-      TZ: 'America/Santo_Domingo',
-      PUPPETEER_EXECUTABLE_PATH: '$CHROME_PATH',
-      NODE_ENV: 'production'
-    },
-    watch: false,
-    max_memory_restart: '500M',
-    error_file: '$INSTALL_DIR/error.log',
-    out_file: '$INSTALL_DIR/out.log',
-    log_file: '$INSTALL_DIR/combined.log',
-    time: true
-  }]
-}
-EOF
-
-pm2 delete gzmbot &> /dev/null || true
-pm2 start ecosystem.config.js &> /dev/null && print_success "Bot iniciado con PM2"
-pm2 save &> /dev/null
-pm2 startup &> /dev/null
-
-# ==================== CONFIGURAR PERMISOS ====================
-print_step "AJUSTANDO PERMISOS"
-
-chown -R $SUDO_USER:$SUDO_USER $INSTALL_DIR 2>/dev/null || chown -R root:root $INSTALL_DIR
-chmod -R 755 $INSTALL_DIR
-print_success "Permisos configurados"
-
-# ==================== CONFIGURAR FIREWALL ====================
-print_step "CONFIGURANDO FIREWALL"
-
-if command -v ufw &> /dev/null; then
-    ufw allow 80/tcp &> /dev/null && print_success "Puerto 80 abierto en firewall"
-else
-    print_warning "UFW no instalado, omite configuración de firewall"
-fi
-
-# ==================== OBTENER IP PÚBLICA (IPv4 preferida) ====================
-print_step "DETECTANDO DIRECCIÓN IP"
-
-# Intentar obtener IPv4 pública
-IPV4=$(curl -4 -s ifconfig.me 2>/dev/null || curl -4 -s icanhazip.com 2>/dev/null || echo "")
-
-if [ -z "$IPV4" ]; then
-    # Si no hay IPv4 pública, usar IP local
-    IPV4=$(hostname -I | awk '{print $1}')
-fi
-
-print_success "IP detectada: $IPV4"
-
-# ==================== MOSTRAR RESUMEN FINAL ====================
-clear
-echo -e "${MAGENTA}"
-echo '    ██████╗ ███████╗███╗   ███╗██████╗  ██████╗ ████████╗'
-echo '   ██╔════╝ ╚══███╔╝████╗ ████║██╔══██╗██╔═══██╗╚══██╔══╝'
-echo '   ██║  ███╗  ███╔╝ ██╔████╔██║██████╔╝██║   ██║   ██║   '
-echo '   ██║   ██║ ███╔╝  ██║╚██╔╝██║██╔══██╗██║   ██║   ██║   '
-echo '   ╚██████╔╝███████╗██║ ╚═╝ ██║██████╔╝╚██████╔╝   ██║   '
-echo '    ╚═════╝ ╚══════╝╚═╝     ╚═╝╚═════╝  ╚═════╝    ╚═╝   '
-echo -e "${NC}"
-echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${WHITE}            INSTALACIÓN COMPLETADA CON ÉXITO${NC}"
-echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}\n"
-
-echo -e "${CYAN}🌐 PANEL WEB:${NC} ${WHITE}http://$IPV4${NC}"
-echo -e "${CYAN}👤 USUARIO:${NC} ${WHITE}$ADMIN_USER${NC}"
-echo -e "${CYAN}🔐 CONTRASEÑA:${NC} ${WHITE}$ADMIN_PASS${NC}"
-echo -e "${CYAN}🕐 ZONA HORARIA:${NC} ${WHITE}America/Santo_Domingo (RD)${NC}"
-echo -e "${CYAN}📁 RUTA:${NC} ${WHITE}$INSTALL_DIR${NC}\n"
-
-echo -e "${YELLOW}════════════════════════ COMANDOS ÚTILES ════════════════════════${NC}"
-echo -e " ${GREEN}▶${NC} Ver estado: ${WHITE}pm2 status${NC}"
-echo -e " ${GREEN}▶${NC} Ver logs: ${WHITE}pm2 logs gzmbot${NC}"
-echo -e " ${GREEN}▶${NC} Reiniciar bot: ${WHITE}pm2 restart gzmbot${NC}"
-echo -e " ${GREEN}▶${NC} Detener bot: ${WHITE}pm2 stop gzmbot${NC}\n"
-
-echo -e "${BLUE}════════════════════════ NOTAS IMPORTANTES ════════════════════════${NC}"
-echo -e " ${WHITE}•${NC} Si el QR no aparece en 30 segundos, verifica los logs."
-echo -e " ${WHITE}•${NC} Para limpiar sesión: ${WHITE}rm -rf $INSTALL_DIR/.wwebjs_auth/*${NC}"
-echo -e " ${WHITE}•${NC} El backup automático se realiza a las 12:00 AM hora RD.\n"
-
-echo -e "${GREEN}═══════════════════════════════════════════════════════════════════${NC}\n"
+echo "===================================================="
+echo "✨ GZMBOT ENTERPRISE - INSTALACIÓN COMPLETADA"
+echo "===================================================="
+echo "🌐 PANEL: http://$IP"
+echo "👤 USUARIO: $ADMIN_USER"
+echo "🔐 PASS: $ADMIN_PASS"
+echo "🕐 TIMEZONE: America/Santo_Domingo (UTC-4)"
+echo "===================================================="
+echo "📦 ESTADO DEL QR:"
+echo "   ✅ Google Chrome estable instalado"
+echo "   ✅ Puppeteer configurado para usar Chrome del sistema"
+echo "   ✅ El bot está iniciado con PM2"
+echo "   ✅ Texto 'Esperando código QR...' visible cuando no hay QR"
+echo "   ✅ QR se actualiza automáticamente al cambiar"
+echo ""
+echo "👉 Espera 30 segundos y visita http://$IP"
+echo "   Ve a la sección 'Conexión' para ver el código QR."
+echo "   Si aún no aparece, revisa el log con: pm2 logs"
+echo "===================================================="
