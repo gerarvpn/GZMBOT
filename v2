@@ -1,61 +1,125 @@
 #!/bin/bash
 
 # ============================================================
-# GZMBOT - VERSIÓN CORREGIDA Y OPTIMIZADA
+# GZMBOT - ENTERPRISE EDITION (CORRECCIONES FINALES)
 # ============================================================
 
 clear
-echo "🚀 Iniciando Instalación de GZMBOT (Versión Estabilizada)..."
+echo "🚀 Iniciando Instalación de GZMBOT (versión definitiva)..."
 
-# 1. Captura de credenciales
-read -p "👤 Usuario para el Panel: " ADMIN_USER
-read -sp "🔐 Contraseña para el Panel: " ADMIN_PASS
+read -p "👤 Usuario Maestro: " ADMIN_USER
+read -sp "🔐 Contraseña Maestra: " ADMIN_PASS
 echo -e "\n"
 
-# 2. Instalación de dependencias del sistema
-echo "[1/4] Instalando dependencias de sistema y Chrome..."
+# ----------------------------------------------------------------------
+# 1. INSTALAR DEPENDENCIAS DEL SISTEMA Y GOOGLE CHROME STABLE
+# ----------------------------------------------------------------------
+echo "📦 Instalando dependencias del sistema y Google Chrome..."
 sudo apt-get update
 sudo apt-get install -y \
-    curl build-essential ffmpeg libnss3 libatk-bridge2.0-0 \
-    libxcomposite1 libxrandr2 libgbm1 libasound2 fonts-liberation \
-    libpangocairo-1.0-0 libxcursor1 libxdamage1 libxi6 libxtst6 \
-    libcups2 libxss1 libxshmfence1
+    curl wget gnupg2 \
+    ca-certificates \
+    fonts-liberation \
+    libappindicator3-1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libgcc-s1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    xdg-utils \
+    --no-install-recommends
 
-# Instalar Node.js 18 si no existe
-if ! command -v node &> /dev/null; then
-    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-    sudo apt-get install -y nodejs
+# Agregar repositorio de Google Chrome e instalarlo
+wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+sudo apt-get update
+sudo apt-get install -y google-chrome-stable
+
+# Verificar instalación
+if ! command -v google-chrome-stable &> /dev/null; then
+    echo "❌ Error: No se pudo instalar Google Chrome."
+    exit 1
 fi
+echo "✅ Google Chrome instalado: $(google-chrome-stable --version)"
 
-# 3. Preparación de carpetas
+# Actualizar caché de librerías
+sudo ldconfig
+
+# ----------------------------------------------------------------------
+# 2. CONFIGURAR VARIABLES DE ENTORNO PARA PUPPETEER
+# ----------------------------------------------------------------------
+export PUPPETEER_EXECUTABLE_PATH=$(which google-chrome-stable)
+export PUPPETEER_SKIP_DOWNLOAD=true
+export TZ='America/Santo_Domingo'
+
+# ----------------------------------------------------------------------
+# 3. INSTALAR NODE.JS 18
+# ----------------------------------------------------------------------
+echo "🟢 Instalando Node.js 18..."
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# ----------------------------------------------------------------------
+# 4. CONFIGURAR ZONA HORARIA
+# ----------------------------------------------------------------------
+sudo timedatectl set-timezone America/Santo_Domingo 2>/dev/null || true
+
+# ----------------------------------------------------------------------
+# 5. CREAR ESTRUCTURA DE CARPETAS
+# ----------------------------------------------------------------------
 mkdir -p $HOME/gzmbot/views
+mkdir -p $HOME/gzmbot/data
+mkdir -p $HOME/gzmbot/media
+mkdir -p $HOME/gzmbot/backups
 cd $HOME/gzmbot
 
-# Configuración inicial
+# ----------------------------------------------------------------------
+# 6. CONFIG.JSON
+# ----------------------------------------------------------------------
 cat <<EOF > config.json
 {
   "adminUser": "$ADMIN_USER",
   "adminPassword": "$ADMIN_PASS",
   "port": 80,
-  "sessionSecret": "$(openssl rand -hex 16)"
+  "sessionSecret": "$(openssl rand -hex 24)",
+  "backupPhone": ""
 }
 EOF
 
-# Crear DB inicial si no existe
-if [ ! -f data.json ]; then
-cat <<EOF > data.json
-{
-  "training": [],
-  "reminders": [],
-  "excluded": [],
-  "stats": { "replied": 0, "total": 0 }
-}
-EOF
-fi
+# ----------------------------------------------------------------------
+# 7. BACKEND (app.js) - CON QR MEJORADO Y ELIMINACIÓN DE LEARNING AL USAR
+# ----------------------------------------------------------------------
+cat <<'APPEOF' > app.js
+// Forzar timezone del proceso a RD
+process.env.TZ = 'America/Santo_Domingo';
 
-# 4. Servidor Backend (app.js)
-cat <<'EOF' > app.js
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const express = require('express');
 const http = require('http');
@@ -63,35 +127,82 @@ const socketIo = require('socket.io');
 const session = require('express-session');
 const fs = require('fs');
 const path = require('path');
+const cron = require('node-cron');
+const moment = require('moment-timezone');
+const multer = require('multer');
 
+const TZ = 'America/Santo_Domingo';
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
-const DATA_PATH = path.join(__dirname, 'data.json');
+const DB_PATH = path.join(__dirname, 'data/database.json');
 const CONFIG_PATH = path.join(__dirname, 'config.json');
+const MEDIA_PATH = path.join(__dirname, 'media');
+const BACKUP_PATH = path.join(__dirname, 'backups');
+const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
+
+if (!fs.existsSync(DB_PATH)) {
+    fs.writeFileSync(DB_PATH, JSON.stringify({
+        training: [], reminders: [], excluded: [], learning: [],
+        stats: { replied: 0, total: 0 }
+    }));
+}
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, file.fieldname === 'backup' ? BACKUP_PATH : MEDIA_PATH);
+    },
+    filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
+});
+const upload = multer({ storage });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/media', express.static(MEDIA_PATH));
 
-let config = JSON.parse(fs.readFileSync(CONFIG_PATH));
+const getConfig = () => JSON.parse(fs.readFileSync(CONFIG_PATH));
+let config = getConfig();
+
 app.use(session({
     secret: config.sessionSecret,
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: true,
+    cookie: { maxAge: 86400000 }
 }));
 
-const loadDB = () => JSON.parse(fs.readFileSync(DATA_PATH));
-const saveDB = (data) => fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
+const getDB = () => JSON.parse(fs.readFileSync(DB_PATH));
+const saveDB = (data) => fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+
+// Función para obtener hora actual de RD
+function nowRD() {
+    return moment().tz(TZ);
+}
 
 let client;
-let botStatus = "Iniciando...";
+let botStatus = "Desconectado";
 let lastQR = null;
+let lastQRImage = null; // Guardar la última imagen generada
+let isConnected = false;
+
+console.log('🕐 Hora del servidor:', new Date().toString());
+console.log('🕐 Hora RD (moment):', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+console.log('🕐 Timezone configurado:', TZ);
+
+// Manejar conexión de nuevos sockets
+io.on('connection', (socket) => {
+    console.log('Cliente conectado al socket');
+    // Si hay una imagen QR guardada, enviarla al nuevo cliente
+    if (lastQRImage) {
+        socket.emit('qr_update', lastQRImage);
+    }
+});
 
 function initBot() {
     client = new Client({
-        authStrategy: new LocalAuth({ dataPath: path.join(__dirname, '.wwebjs_auth') }),
+        authStrategy: new LocalAuth({ dataPath: AUTH_PATH }),
         puppeteer: {
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         }
@@ -99,429 +210,1108 @@ function initBot() {
 
     client.on('qr', (qr) => {
         botStatus = "Esperando QR";
+        isConnected = false;
         lastQR = qr;
         qrcode.toDataURL(qr, (err, url) => {
-            io.emit('bot_qr', url);
-            io.emit('bot_status', botStatus);
+            if (!err) {
+                lastQRImage = url; // Guardar la imagen
+                io.emit('qr_update', url);
+            } else {
+                console.error('Error generando QR:', err);
+                lastQRImage = null;
+            }
+            io.emit('connection_status', { connected: false, status: botStatus });
+            io.emit('status_update', botStatus);
         });
     });
 
     client.on('ready', () => {
         botStatus = "Conectado";
+        isConnected = true;
         lastQR = null;
-        io.emit('bot_status', botStatus);
-        io.emit('bot_qr', null);
+        lastQRImage = null; // Limpiar QR
+        io.emit('status_update', botStatus);
+        io.emit('connection_status', { connected: true, status: botStatus });
+        console.log('✅ Bot conectado -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
     });
 
-    client.on('disconnected', async () => {
+    client.on('authenticated', () => console.log('🔐 Autenticado'));
+
+    client.on('auth_failure', (msg) => {
+        console.error('❌ Auth failure:', msg);
+        botStatus = "Error de autenticación";
+        io.emit('status_update', botStatus);
+    });
+
+    client.on('disconnected', (reason) => {
         botStatus = "Desconectado";
-        io.emit('bot_status', botStatus);
-        try { await client.destroy(); } catch(e){}
-        initBot();
+        isConnected = false;
+        lastQR = null;
+        lastQRImage = null; // Limpiar QR al desconectar
+        io.emit('status_update', botStatus);
+        io.emit('connection_status', { connected: false, status: botStatus });
+        io.emit('qr_clear'); // Nuevo evento para indicar que no hay QR
+        console.log('❌ Bot desconectado:', reason);
     });
 
     client.on('message', async (msg) => {
-        const db = loadDB();
-        const phone = msg.from.split('@')[0];
-        if (db.excluded.some(ex => phone === ex.phone)) return;
+        try {
+            if (msg.from === 'status@broadcast') return;
 
-        const trigger = db.training.find(t => msg.body.toLowerCase().includes(t.key.toLowerCase()));
-        if(trigger) {
-            await msg.reply(trigger.response);
-            db.stats.replied++;
+            const db = getDB();
+            const phone = msg.from.replace('@c.us', '');
+
+            if (db.excluded.some(ex => phone.includes(ex.phone))) return;
+
+            const text = msg.body.toLowerCase().trim();
+
+            const trigger = db.training.find(t => {
+                const key = t.key.toLowerCase().trim();
+                return text.includes(key) || key.includes(text);
+            });
+
+            if (trigger) {
+                if (trigger.mediaPaths && trigger.mediaPaths.length > 0) {
+                    try {
+                        const firstMedia = MessageMedia.fromFilePath(trigger.mediaPaths[0]);
+                        await msg.reply(firstMedia, null, { caption: trigger.response });
+                        for (let i = 1; i < trigger.mediaPaths.length; i++) {
+                            const media = MessageMedia.fromFilePath(trigger.mediaPaths[i]);
+                            await msg.reply(media);
+                        }
+                    } catch (e) {
+                        await msg.reply(trigger.response);
+                    }
+                } else {
+                    await msg.reply(trigger.response);
+                }
+                db.stats.replied++;
+            } else if (!msg.from.includes('@g.us')) {
+                const msgData = {
+                    text: msg.body, from: phone,
+                    date: nowRD().format('DD/MM HH:mm'),
+                    hasMedia: msg.hasMedia, type: msg.type
+                };
+                if (!db.learning.some(l => l.text === msg.body && l.from === phone)) {
+                    db.learning.push(msgData);
+                }
+            }
+
+            db.stats.total++;
+            saveDB(db);
+            io.emit('data_update', db);
+        } catch (e) {
+            console.error('Error en mensaje:', e);
         }
-        db.stats.total++;
-        saveDB(db);
-        io.emit('update_ui', db);
     });
 
-    client.initialize().catch(e => console.error("Error Init:", e));
+    client.initialize().catch(e => console.error("Error al iniciar:", e));
 }
+
+async function createBackup() {
+    try {
+        const timestamp = nowRD().format('YYYY-MM-DD_HH-mm-ss');
+        const backupData = {
+            date: nowRD().format('DD/MM/YYYY HH:mm'),
+            database: getDB(),
+            config: getConfig()
+        };
+        const backupFile = path.join(BACKUP_PATH, 'backup_' + timestamp + '.json');
+        fs.writeFileSync(backupFile, JSON.stringify(backupData, null, 2));
+        console.log('✅ Backup creado:', backupFile, '-', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+        return backupFile;
+    } catch (e) {
+        console.error('❌ Error backup:', e);
+        return null;
+    }
+}
+
+async function sendBackupToWhatsApp(backupFile) {
+    if (!isConnected) {
+        console.log('❌ Bot no conectado, backup no enviado');
+        return false;
+    }
+    const freshConfig = getConfig();
+    if (!freshConfig.backupPhone || freshConfig.backupPhone.trim() === '') {
+        console.log('❌ No hay número de backup configurado');
+        return false;
+    }
+    try {
+        const chatId = freshConfig.backupPhone.includes('@') ?
+            freshConfig.backupPhone : freshConfig.backupPhone + '@c.us';
+        const media = MessageMedia.fromFilePath(backupFile);
+        await client.sendMessage(chatId, media, {
+            caption: '🔐 *Backup GZMBOT*\n\n📅 Fecha: ' + nowRD().format('DD/MM/YYYY HH:mm') + '\n🕐 Hora RD\n\n✅ Copia de seguridad completada'
+        });
+        console.log('✅ Backup enviado a WhatsApp -', nowRD().format('HH:mm:ss'));
+        return true;
+    } catch (e) {
+        console.error('❌ Error enviando backup:', e);
+        return false;
+    }
+}
+
+// ============ CRON BACKUP AUTOMÁTICO 12:00 AM HORA RD ============
+cron.schedule('0 0 * * *', async () => {
+    console.log('🔄 [CRON] Backup automático iniciado -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+    const bf = await createBackup();
+    if (bf) {
+        const sent = await sendBackupToWhatsApp(bf);
+        console.log('🔄 [CRON] Backup enviado:', sent);
+    }
+}, {
+    scheduled: true,
+    timezone: TZ
+});
+
+console.log('📅 Backup automático programado para 12:00 AM hora RD');
+
+// ============ CRON RECORDATORIOS - CADA MINUTO ============
+cron.schedule('* * * * *', () => {
+    if (!isConnected) return;
+
+    const db = getDB();
+    const currentRD = nowRD().format('YYYY-MM-DDTHH:mm');
+    let changed = false;
+
+    for (let i = db.reminders.length - 1; i >= 0; i--) {
+        const rem = db.reminders[i];
+
+        if (rem.date === currentRD) {
+            console.log('🔔 Enviando recordatorio a', rem.name, '(' + rem.phone + ') -', currentRD);
+
+            const chatId = rem.phone.includes('@') ? rem.phone : rem.phone + '@c.us';
+            client.sendMessage(chatId, rem.message)
+                .then(() => console.log('✅ Recordatorio enviado a', rem.name))
+                .catch(e => console.error("❌ Error recordatorio:", e.message));
+
+            if (rem.freq === 'Diario') {
+                rem.date = moment.tz(rem.date, TZ).add(1, 'days').format('YYYY-MM-DDTHH:mm');
+            } else if (rem.freq === 'Semanal') {
+                rem.date = moment.tz(rem.date, TZ).add(7, 'days').format('YYYY-MM-DDTHH:mm');
+            } else if (rem.freq === 'Mensual') {
+                rem.date = moment.tz(rem.date, TZ).add(1, 'months').format('YYYY-MM-DDTHH:mm');
+            } else if (rem.freq === 'Anual') {
+                rem.date = moment.tz(rem.date, TZ).add(1, 'years').format('YYYY-MM-DDTHH:mm');
+            } else {
+                db.reminders.splice(i, 1);
+            }
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        saveDB(db);
+        io.emit('data_update', db);
+    }
+}, {
+    scheduled: true,
+    timezone: TZ
+});
+
+console.log('⏰ Recordatorios activos - verificando cada minuto en hora RD');
 
 initBot();
 
-// Middleware de Auth
-const auth = (req, res, next) => req.session.user ? next() : res.redirect('/login');
+const checkAuth = (req, res, next) => req.session.user ? next() : res.status(401).send("Unauthorized");
 
+app.get('/', (req, res) => req.session.user ? res.sendFile(path.join(__dirname, 'views/index.html')) : res.redirect('/login'));
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'views/login.html')));
+
 app.post('/login', (req, res) => {
-    const currentConfig = JSON.parse(fs.readFileSync(CONFIG_PATH));
-    if(req.body.user === currentConfig.adminUser && req.body.pass === currentConfig.adminPassword) {
-        req.session.user = currentConfig.adminUser;
-        res.redirect('/');
-    } else res.redirect('/login?err=1');
-});
-app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login'); });
-app.get('/', auth, (req, res) => res.sendFile(path.join(__dirname, 'views/index.html')));
-
-// API CRUD
-app.get('/api/data', auth, (req, res) => {
-    res.json({ ...loadDB(), botStatus, qrCode: lastQR });
+    const fc = getConfig();
+    if (req.body.user === fc.adminUser && req.body.pass === fc.adminPassword) {
+        req.session.user = req.body.user;
+        res.json({ ok: true });
+    } else res.json({ ok: false });
 });
 
-app.post('/api/train', auth, (req, res) => {
-    const db = loadDB();
+app.get('/api/data', checkAuth, (req, res) => {
+    res.json({
+        ...getDB(), botStatus, qr: lastQR, isConnected,
+        backupPhone: getConfig().backupPhone || '',
+        serverTime: nowRD().format('DD/MM/YYYY HH:mm:ss'),
+        timezone: TZ
+    });
+});
+
+app.get('/api/server-time', checkAuth, (req, res) => {
+    res.json({
+        serverTimeRD: nowRD().format('DD/MM/YYYY HH:mm:ss'),
+        serverTimeUTC: moment.utc().format('DD/MM/YYYY HH:mm:ss'),
+        timezone: TZ,
+        nextBackup: '12:00 AM hora RD'
+    });
+});
+
+app.post('/api/train', checkAuth, upload.array('media', 10), (req, res) => {
+    const db = getDB();
     const { id, key, response } = req.body;
-    if (id !== "" && id !== null && id !== undefined) {
-        db.training[parseInt(id)] = { key, response };
+    const trainData = {
+        key, response,
+        mediaPaths: req.files && req.files.length > 0 ? req.files.map(f => f.path) : [],
+        mediaTypes: req.files && req.files.length > 0 ? req.files.map(f => f.mimetype) : []
+    };
+    if (id !== "" && id !== null && id !== undefined && id !== "undefined") {
+        if (db.training[id] && db.training[id].mediaPaths && db.training[id].mediaPaths.length > 0) {
+            db.training[id].mediaPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+        }
+        db.training[id] = trainData;
     } else {
-        db.training.push({ key, response });
+        db.training.push(trainData);
     }
+
+    // Eliminar de learning si el mensaje fue usado
+    if (key) {
+        const index = db.learning.findIndex(l => l.text.toLowerCase().trim() === key.toLowerCase().trim());
+        if (index !== -1) {
+            db.learning.splice(index, 1);
+        }
+    }
+
     saveDB(db);
+    io.emit('data_update', db);
     res.json({ ok: true });
 });
 
-app.delete('/api/train/:id', auth, (req, res) => {
-    const db = loadDB();
-    db.training.splice(parseInt(req.params.id), 1);
-    saveDB(db);
-    res.json({ ok: true });
+app.delete('/api/train/:id', checkAuth, (req, res) => {
+    const db = getDB();
+    const item = db.training[req.params.id];
+    if (item && item.mediaPaths && item.mediaPaths.length > 0) {
+        item.mediaPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+    }
+    db.training.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
-app.post('/api/reminders', auth, (req, res) => {
-    const db = loadDB();
+app.get('/api/train/template', checkAuth, (req, res) => {
+    const template = '# PLANTILLA DE ENTRENAMIENTO GZMBOT\n# =====================================\n#\n# FORMATO:\n# PREGUNTA: texto que el usuario escribe\n# RESPUESTA: texto que el bot responde\n# ---\n\nPREGUNTA: hola\nRESPUESTA: ¡Hola! Bienvenido. ¿En qué puedo ayudarte?\n---\n\nPREGUNTA: horario\nRESPUESTA: Lunes a Viernes: 9:00 AM - 6:00 PM\\nSábados: 9:00 AM - 1:00 PM\\nDomingos: Cerrado\n---\n\nPREGUNTA: precio\nRESPUESTA: Contacta a nuestro equipo de ventas para precios.\n---\n\nPREGUNTA: ubicación\nRESPUESTA: Av. Principal #123, Ciudad.\n---\n';
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=plantilla_entrenamiento.txt');
+    res.send(template);
+});
+
+app.post('/api/train/import', checkAuth, upload.single('file'), (req, res) => {
+    try {
+        const fileContent = fs.readFileSync(req.file.path, 'utf-8');
+        const lines = fileContent.split('\n');
+        const db = getDB();
+        let cQ = '', cR = '', imported = 0;
+        for (let line of lines) {
+            line = line.trim();
+            if (line.startsWith('#') || line === '') continue;
+            if (line.startsWith('PREGUNTA:')) cQ = line.replace('PREGUNTA:', '').trim();
+            else if (line.startsWith('RESPUESTA:')) {
+                cR = line.replace('RESPUESTA:', '').trim().replace(/\\n/g, '\n');
+            } else if (line === '---' && cQ && cR) {
+                db.training.push({ key: cQ, response: cR, mediaPaths: [], mediaTypes: [] });
+                imported++; cQ = ''; cR = '';
+            }
+        }
+        if (cQ && cR) { db.training.push({ key: cQ, response: cR, mediaPaths: [], mediaTypes: [] }); imported++; }
+        saveDB(db); io.emit('data_update', db); fs.unlinkSync(req.file.path);
+        res.json({ ok: true, imported });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/api/train/export', checkAuth, (req, res) => {
+    const db = getDB();
+    let content = '# RESPUESTAS GZMBOT\n# Exportado: ' + nowRD().format('DD/MM/YYYY HH:mm') + '\n# Total: ' + db.training.length + '\n\n';
+    db.training.forEach(t => {
+        if (!t.mediaPaths || t.mediaPaths.length === 0) {
+            content += 'PREGUNTA: ' + t.key + '\nRESPUESTA: ' + t.response.replace(/\n/g, '\\n') + '\n---\n\n';
+        }
+    });
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=respuestas_exportadas.txt');
+    res.send(content);
+});
+
+app.post('/api/reminders', checkAuth, (req, res) => {
+    const db = getDB();
     const { id, name, phone, message, freq, date } = req.body;
-    const item = { name, phone: phone.replace(/\D/g, ''), message, freq, date };
-    if (id !== "" && id !== null && id !== undefined) {
-        db.reminders[parseInt(id)] = item;
-    } else {
-        db.reminders.push(item);
-    }
-    saveDB(db);
+    const data = { name, phone: phone.replace(/\D/g, ''), message, freq, date };
+
+    console.log('📝 Recordatorio guardado:', name, '- Fecha:', date, '- Hora actual RD:', nowRD().format('YYYY-MM-DDTHH:mm'));
+
+    if (id !== "" && id !== null && id !== undefined && id !== "undefined") db.reminders[id] = data;
+    else db.reminders.push(data);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+
+app.delete('/api/reminders/:id', checkAuth, (req, res) => {
+    const db = getDB(); db.reminders.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+
+app.post('/api/exclude', checkAuth, (req, res) => {
+    const db = getDB(); db.excluded.push(req.body);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+
+app.delete('/api/exclude/:id', checkAuth, (req, res) => {
+    const db = getDB(); db.excluded.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+
+app.delete('/api/learning/:id', checkAuth, (req, res) => {
+    const db = getDB(); db.learning.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+
+app.post('/api/config/credentials', checkAuth, (req, res) => {
+    const fc = getConfig();
+    if (req.body.user) fc.adminUser = req.body.user;
+    if (req.body.pass) fc.adminPassword = req.body.pass;
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
     res.json({ ok: true });
 });
 
-app.delete('/api/reminders/:id', auth, (req, res) => {
-    const db = loadDB();
-    db.reminders.splice(parseInt(req.params.id), 1);
-    saveDB(db);
+app.post('/api/config/backup-phone', checkAuth, (req, res) => {
+    const fc = getConfig();
+    fc.backupPhone = req.body.backupPhone || '';
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
+    console.log('📱 Número backup guardado:', fc.backupPhone);
     res.json({ ok: true });
 });
 
-app.post('/api/exclude', auth, (req, res) => {
-    const db = loadDB();
-    db.excluded.push({ name: req.body.name, phone: req.body.phone.replace(/\D/g, '') });
-    saveDB(db);
-    res.json({ ok: true });
+app.get('/api/backup/download', checkAuth, async (req, res) => {
+    try {
+        const bf = await createBackup();
+        if (bf) {
+            res.download(bf, path.basename(bf), (err) => {
+                if (err && !res.headersSent) res.status(500).send('Error');
+            });
+        } else res.status(500).json({ ok: false, message: 'Error creando backup' });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.delete('/api/exclude/:id', auth, (req, res) => {
-    const db = loadDB();
-    db.excluded.splice(parseInt(req.params.id), 1);
-    saveDB(db);
-    res.json({ ok: true });
+app.post('/api/backup/send', checkAuth, async (req, res) => {
+    if (!isConnected) return res.json({ ok: false, message: 'Bot no está conectado' });
+    const fc = getConfig();
+    if (!fc.backupPhone || fc.backupPhone.trim() === '') return res.json({ ok: false, message: 'No hay número configurado. Guárdalo primero.' });
+    const bf = await createBackup();
+    if (!bf) return res.json({ ok: false, message: 'Error creando backup' });
+    const sent = await sendBackupToWhatsApp(bf);
+    res.json({ ok: sent, message: sent ? 'Backup enviado correctamente' : 'Error enviando backup' });
 });
 
-app.post('/api/config', auth, (req, res) => {
-    let currentConfig = JSON.parse(fs.readFileSync(CONFIG_PATH));
-    if(req.body.newUser) currentConfig.adminUser = req.body.newUser;
-    if(req.body.newPass) currentConfig.adminPassword = req.body.newPass;
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(currentConfig, null, 2));
-    res.json({ ok: true });
+app.post('/api/backup/restore', checkAuth, upload.single('backup'), (req, res) => {
+    try {
+        const bc = JSON.parse(fs.readFileSync(req.file.path, 'utf-8'));
+        if (bc.database) { saveDB(bc.database); io.emit('data_update', bc.database); }
+        if (bc.config) {
+            const cc = getConfig();
+            const nc = { ...bc.config, adminUser: cc.adminUser, adminPassword: cc.adminPassword, sessionSecret: cc.sessionSecret };
+            fs.writeFileSync(CONFIG_PATH, JSON.stringify(nc, null, 2));
+        }
+        fs.unlinkSync(req.file.path);
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.post('/api/logout-wa', auth, async (req, res) => {
+app.post('/api/logout-wa', checkAuth, async (req, res) => {
     try {
         await client.logout();
-        const authDir = path.join(__dirname, '.wwebjs_auth');
-        if(fs.existsSync(authDir)) fs.rmSync(authDir, { recursive: true, force: true });
+        if (fs.existsSync(AUTH_PATH)) fs.rmSync(AUTH_PATH, { recursive: true, force: true });
+        isConnected = false;
+        botStatus = "Desconectado";
+        lastQRImage = null; // Limpiar QR
+        const db = getDB();
+        db.stats.replied = 0;
+        db.stats.total = 0;
+        saveDB(db);
+        io.emit('data_update', db);
+        io.emit('qr_clear'); // Notificar a los clientes
         res.json({ ok: true });
-        setTimeout(() => process.exit(1), 1500); // PM2 reiniciará y pedirá nuevo QR
+        setTimeout(() => process.exit(0), 1000);
     } catch (e) { res.status(500).send(e.message); }
 });
 
-server.listen(config.port, '0.0.0.0', () => console.log(`Server on port ${config.port}`));
-EOF
+server.listen(config.port, '0.0.0.0', () => {
+    console.log('🚀 GZMBOT ONLINE en puerto', config.port);
+    console.log('🕐 Hora actual RD:', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+    console.log('📅 Próximo backup: 12:00 AM hora RD');
+});
+APPEOF
 
-# 5. Interfaz de Usuario Mejorada (index.html)
-cat <<'EOF' > views/index.html
+# ----------------------------------------------------------------------
+# 8. FRONTEND (index.html) - CON CIERRE DE MENÚ AL HACER CLIC FUERA Y ESTILO DE FECHA MEJORADO
+# ----------------------------------------------------------------------
+cat <<'HTMLEOF' > views/index.html
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GZMBOT | Control Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GZMBOT | Enterprise</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
     <style>
-        body { background: #070709; color: #e4e4e7; font-family: 'Plus Jakarta Sans', sans-serif; overflow: hidden; }
-        .glass { background: rgba(20, 20, 25, 0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); }
-        .page { display: none; height: calc(100vh - 80px); overflow-y: auto; padding: 2rem; animation: slideUp 0.3s ease-out; }
-        .page.active { display: block; }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        input, select, textarea { background: #121216 !important; border: 1px solid #27272a !important; color: white !important; }
-        .nav-btn { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; color: #71717a; transition: 0.2s; width: 100%; }
-        .nav-btn:hover { background: #18181b; color: white; }
-        .nav-btn.active { background: #2563eb; color: white; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0a0a0f;
+            color: #f4f4f5;
+            font-family: 'Inter', sans-serif;
+            background-image: radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.03) 0%, transparent 50%);
+        }
+        .glass {
+            background: rgba(18, 18, 24, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        .glass-card {
+            background: rgba(24, 24, 32, 0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.02);
+            border-radius: 24px;
+            transition: transform 0.2s ease, border-color 0.2s;
+        }
+        .glass-card:hover {
+            border-color: rgba(37, 99, 235, 0.3);
+            transform: translateY(-2px);
+        }
+        .sidebar-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 14px;
+            color: #a1a1aa;
+            transition: all 0.2s;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .sidebar-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            color: #fff;
+        }
+        .sidebar-item.active {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+            box-shadow: 0 8px 20px -8px #2563eb80;
+        }
+        .page {
+            display: none;
+            animation: fadeIn 0.3s ease-out;
+        }
+        .page.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        input, select, textarea {
+            background: #0f0f13 !important;
+            border: 1px solid #27272a !important;
+            color: #fff !important;
+            padding: 12px 16px !important;
+            border-radius: 14px !important;
+            outline: none;
+            width: 100%;
+            font-size: 15px;
+            transition: border 0.2s;
+        }
+        /* Estilo específico para datetime-local (más compacto) */
+        input[type="datetime-local"] {
+            padding: 10px 12px !important;
+            font-size: 14px !important;
+            min-height: 45px;
+        }
+        input:focus, textarea:focus, select:focus {
+            border-color: #2563eb !important;
+        }
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3f3f46;
+            border-radius: 10px;
+        }
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            line-height: 1;
+            background: linear-gradient(135deg, #fff, #a5b4fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .badge {
+            padding: 4px 10px;
+            border-radius: 30px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+        .reminder-item, .learning-item {
+            background: rgba(39, 39, 45, 0.5);
+            border-radius: 16px;
+            padding: 14px;
+            border: 1px solid rgba(255,255,255,0.02);
+            margin-bottom: 8px;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #60a5fa, #ffffff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .media-preview { max-width: 100px; max-height: 100px; border-radius: 12px; margin: 4px; object-fit: cover; }
+        .media-type-selector { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        .media-type-btn { padding: 8px 16px; background: #0f0f13; border: 1px solid #27272a; border-radius: 10px; cursor: pointer; transition: all 0.3s; color: #fff; font-size: 14px; }
+        .media-type-btn.active { background: #2563eb; border-color: #2563eb; }
+        .media-preview-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .media-item { position: relative; }
+        .media-remove { position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 12px; font-weight: bold; }
+        .preserve-whitespace { white-space: pre-wrap; word-break: break-word; }
     </style>
 </head>
-<body class="flex flex-col h-screen">
-    <header class="h-[80px] px-8 flex justify-between items-center glass z-50">
-        <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
-                <i data-lucide="zap" class="text-white"></i>
-            </div>
-            <span class="text-xl font-black tracking-tighter">GZMBOT</span>
-        </div>
-        <div class="flex items-center gap-4">
-            <div id="status-badge" class="px-4 py-1.5 rounded-full bg-black/40 border border-white/5 flex items-center gap-2">
-                <div id="status-dot" class="w-2 h-2 rounded-full bg-gray-500"></div>
-                <span id="bot-status-text" class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Iniciando</span>
-            </div>
-            <button onclick="toggleSidebar()" class="lg:hidden p-2 bg-white/5 rounded-lg"><i data-lucide="menu"></i></button>
-        </div>
-    </header>
+<body class="flex h-screen overflow-hidden">
 
-    <div class="flex flex-1 overflow-hidden">
-        <aside id="sidebar" class="fixed lg:static inset-y-0 left-0 w-64 glass lg:translate-x-0 -translate-x-full transition-transform z-[60] p-6 flex flex-col">
-            <nav class="space-y-1 flex-1">
-                <button onclick="nav('dash')" id="btn-dash" class="nav-btn active"><i data-lucide="layout-dashboard"></i> Dashboard</button>
-                <button onclick="nav('conn')" id="btn-conn" class="nav-btn"><i data-lucide="qr-code"></i> Vinculación</button>
-                <div class="py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Bot AI</div>
-                <button onclick="nav('train')" id="btn-train" class="nav-btn"><i data-lucide="message-square"></i> Respuestas</button>
-                <button onclick="nav('rem')" id="btn-rem" class="nav-btn"><i data-lucide="calendar"></i> Recordatorios</button>
-                <button onclick="nav('excl')" id="btn-excl" class="nav-btn"><i data-lucide="user-x"></i> Excluidos</button>
-                <button onclick="nav('config')" id="btn-config" class="nav-btn mt-4"><i data-lucide="settings"></i> Ajustes</button>
-            </nav>
-            <a href="/logout" class="p-4 bg-red-500/10 text-red-500 rounded-xl flex items-center gap-3 font-bold text-sm">
-                <i data-lucide="log-out"></i> Cerrar Panel
-            </a>
-        </aside>
+    <!-- SIDEBAR -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r border-white/5 -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-5 overflow-y-auto">
+        <div class="flex items-center gap-3 mb-8 px-3">
+            <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-500 rounded-xl flex items-center justify-center shadow-xl flex-shrink-0">
+                <i data-lucide="bot" class="text-white w-5 h-5"></i>
+            </div>
+            <span class="text-xl font-extrabold tracking-tight gradient-text">GZMBOT</span>
+        </div>
+        <nav class="space-y-1 flex-1">
+            <div onclick="nav('dash'); if(window.innerWidth<1024) toggleSidebar()" id="n-dash" class="sidebar-item active"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></div>
+            <div onclick="nav('conn'); if(window.innerWidth<1024) toggleSidebar()" id="n-conn" class="sidebar-item"><i data-lucide="qr-code"></i><span>Conexión</span></div>
+            <div onclick="nav('train'); if(window.innerWidth<1024) toggleSidebar()" id="n-train" class="sidebar-item"><i data-lucide="message-square"></i><span>Respuestas</span></div>
+            <div onclick="nav('learn'); if(window.innerWidth<1024) toggleSidebar()" id="n-learn" class="sidebar-item"><i data-lucide="brain"></i><span>Aprender</span></div>
+            <div onclick="nav('rem'); if(window.innerWidth<1024) toggleSidebar()" id="n-rem" class="sidebar-item"><i data-lucide="bell"></i><span>Recordatorios</span></div>
+            <div onclick="nav('excl'); if(window.innerWidth<1024) toggleSidebar()" id="n-excl" class="sidebar-item"><i data-lucide="shield-off"></i><span>Excluidos</span></div>
+            <div onclick="nav('config'); if(window.innerWidth<1024) toggleSidebar()" id="n-config" class="sidebar-item"><i data-lucide="settings"></i><span>Ajustes</span></div>
+        </nav>
+        <button onclick="location.href='/login'" class="sidebar-item text-red-400 hover:bg-red-500/10 mt-6">
+            <i data-lucide="log-out"></i><span>Salir</span>
+        </button>
+    </aside>
 
-        <main class="flex-1 relative">
-            <!-- DASHBOARD -->
+    <!-- MAIN CONTENT (se cierra el menú al hacer clic aquí en móvil) -->
+    <main id="main-content" class="flex-1 flex flex-col min-w-0 overflow-hidden" onclick="if(window.innerWidth<1024 && !document.getElementById('sidebar').classList.contains('-translate-x-full')) toggleSidebar()">
+        <header class="lg:hidden p-4 glass border-b border-white/5 flex justify-between items-center flex-shrink-0">
+            <span class="font-bold text-lg gradient-text">GZMBOT</span>
+            <button onclick="toggleSidebar(); event.stopPropagation()" class="p-2 text-zinc-400 hover:text-white">
+                <i data-lucide="menu"></i>
+            </button>
+        </header>
+
+        <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+            <!-- ========== DASHBOARD ========== -->
             <div id="p-dash" class="page active">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="glass p-8 rounded-3xl">
-                        <p class="text-gray-500 text-xs font-bold uppercase mb-2">Respuestas Automáticas</p>
-                        <h3 id="s-replied" class="text-5xl font-black text-blue-500">0</h3>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                    <h1 class="text-3xl font-bold gradient-text">Panel de Control</h1>
+                    <div class="flex items-center gap-4">
+                        <div id="server-clock" class="text-sm text-zinc-500 font-mono bg-white/5 px-4 py-2 rounded-full"></div>
+                        <div class="px-4 py-2 glass-card flex items-center gap-2">
+                            <div id="dot" class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></div>
+                            <span id="bot-status" class="text-xs font-semibold uppercase tracking-wider text-zinc-400">Desconectado</span>
+                        </div>
                     </div>
-                    <div class="glass p-8 rounded-3xl">
-                        <p class="text-gray-500 text-xs font-bold uppercase mb-2">Total Mensajes</p>
-                        <h3 id="s-total" class="text-5xl font-black text-white">0</h3>
+                </div>
+
+                <!-- Tarjetas de estadísticas principales -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
+                    <div class="glass-card p-6 flex items-center gap-4">
+                        <div class="w-14 h-14 rounded-2xl bg-blue-500/20 flex items-center justify-center">
+                            <i data-lucide="message-circle" class="w-7 h-7 text-blue-400"></i>
+                        </div>
+                        <div>
+                            <p class="text-zinc-500 text-sm font-medium">Respondidas</p>
+                            <h2 id="s-replied" class="stat-value">0</h2>
+                        </div>
                     </div>
+                    <div class="glass-card p-6 flex items-center gap-4">
+                        <div class="w-14 h-14 rounded-2xl bg-purple-500/20 flex items-center justify-center">
+                            <i data-lucide="users" class="w-7 h-7 text-purple-400"></i>
+                        </div>
+                        <div>
+                            <p class="text-zinc-500 text-sm font-medium">Total mensajes</p>
+                            <h2 id="s-total" class="stat-value">0</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Próximos recordatorios -->
+                <div class="glass-card p-6 mb-8">
+                    <div class="flex items-center gap-3 mb-4">
+                        <i data-lucide="bell" class="w-5 h-5 text-emerald-400"></i>
+                        <h3 class="font-semibold text-lg gradient-text">Próximos recordatorios</h3>
+                        <span class="badge bg-emerald-500/10 text-emerald-400 ml-auto">HOY</span>
+                    </div>
+                    <div id="upcoming-reminders-list" class="space-y-2">
+                        <div class="text-zinc-500 text-sm py-4 text-center">Cargando...</div>
+                    </div>
+                    <button onclick="nav('rem')" class="mt-3 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1">
+                        Ver todos <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <!-- Últimos mensajes sin respuesta (ocupa toda la fila) -->
+                <div class="glass-card p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <i data-lucide="brain" class="w-5 h-5 text-amber-400"></i>
+                        <h3 class="font-semibold text-lg gradient-text">Últimos mensajes sin respuesta</h3>
+                    </div>
+                    <div id="recent-learning-list" class="space-y-2 max-h-80 overflow-y-auto pr-2">
+                        <div class="text-zinc-500 text-sm py-4 text-center">No hay datos</div>
+                    </div>
+                    <button onclick="nav('learn')" class="mt-3 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1">
+                        Ir a aprender <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
                 </div>
             </div>
 
-            <!-- VINCULACION -->
+            <!-- ========== CONEXIÓN ========== -->
             <div id="p-conn" class="page">
-                <div class="max-w-md mx-auto text-center mt-12">
-                    <div id="qr-box" class="glass p-10 rounded-[3rem] shadow-2xl">
-                        <div id="qr-img" class="bg-white p-4 rounded-3xl inline-block mb-6 min-w-[200px] min-h-[200px] flex items-center justify-center">
-                            <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent animate-spin rounded-full"></div>
-                        </div>
-                        <h3 class="text-2xl font-bold mb-2">Conexión WhatsApp</h3>
-                        <p id="conn-desc" class="text-gray-500 text-sm mb-8">Escanea el código para activar el bot.</p>
-                        <div id="active-actions" class="hidden">
-                            <div class="flex items-center justify-center gap-2 text-green-500 font-bold mb-8">
-                                <i data-lucide="check-circle"></i> BOT CONECTADO
-                            </div>
-                            <button onclick="logoutWA()" class="w-full py-4 bg-red-500/10 text-red-500 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition">DESVINCULAR WHATSAPP</button>
+                <h2 class="text-2xl font-bold gradient-text mb-6">Conexión WhatsApp</h2>
+                <div class="max-w-md mx-auto glass-card p-8 text-center">
+                    <div id="qr-container" class="bg-white p-4 rounded-3xl inline-block mb-6">
+                        <div id="qr-img" class="w-64 h-64 flex items-center justify-center text-black font-bold">
+                            <span class="text-sm text-gray-500">Esperando código QR...</span>
                         </div>
                     </div>
+                    <div id="connected-container" class="hidden mb-6">
+                        <div class="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>
+                        </div>
+                        <h2 class="text-2xl font-bold text-green-500 mb-2">WhatsApp Vinculado</h2>
+                        <p class="text-zinc-500">El bot está conectado y funcionando.</p>
+                    </div>
+                    <h2 class="text-xl font-bold mb-2">Escanear código QR</h2>
+                    <p class="text-zinc-500 text-sm mb-6">Usa WhatsApp para vincular el bot.</p>
+                    <button id="btn-logout-wa" onclick="logoutWA()" class="hidden w-full py-4 bg-red-500/10 text-red-500 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition">
+                        <i data-lucide="unlink" class="inline w-4 h-4 mr-2"></i>DESVINCULAR
+                    </button>
                 </div>
             </div>
 
-            <!-- RESPUESTAS -->
+            <!-- ========== RESPUESTAS ========== -->
             <div id="p-train" class="page">
-                <div class="max-w-3xl mx-auto space-y-6">
-                    <div class="glass p-6 rounded-3xl">
-                        <h3 class="font-bold mb-4">Configurar Respuesta</h3>
-                        <input type="hidden" id="t-id">
-                        <div class="space-y-4">
-                            <input type="text" id="t-key" placeholder="Palabra clave" class="w-full p-4 rounded-xl outline-none">
-                            <textarea id="t-res" placeholder="Respuesta del bot" class="w-full p-4 rounded-xl h-32 outline-none"></textarea>
-                            <button onclick="saveT()" class="w-full py-4 bg-blue-600 rounded-xl font-bold">GUARDAR CONFIGURACIÓN</button>
-                        </div>
+                <h2 class="text-2xl font-bold gradient-text mb-4">Gestión de Respuestas</h2>
+                <div class="mb-4 flex gap-2 flex-wrap">
+                    <button onclick="downloadTemplate()" class="px-4 py-2 bg-purple-600 rounded-xl font-bold flex items-center gap-2 hover:bg-purple-700 transition text-sm">
+                        <i data-lucide="download" class="w-4 h-4"></i>Plantilla
+                    </button>
+                    <button onclick="document.getElementById('import-file').click()" class="px-4 py-2 bg-green-600 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition text-sm">
+                        <i data-lucide="upload" class="w-4 h-4"></i>Importar
+                    </button>
+                    <button onclick="exportTraining()" class="px-4 py-2 bg-orange-600 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-700 transition text-sm">
+                        <i data-lucide="file-text" class="w-4 h-4"></i>Exportar
+                    </button>
+                    <input type="file" id="import-file" accept=".txt" class="hidden" onchange="importTraining(this)">
+                </div>
+                <div class="grid lg:grid-cols-3 gap-4 sm:gap-8">
+                    <div class="lg:col-span-1 glass p-4 sm:p-6 rounded-2xl h-fit">
+                        <h3 class="font-bold mb-4 flex items-center gap-2"><i data-lucide="plus-circle" class="text-blue-500"></i> Nueva Regla</h3>
+                        <form id="train-form" enctype="multipart/form-data" onsubmit="saveTrain(event)">
+                            <input type="hidden" id="t-id">
+                            <input type="text" id="t-key" placeholder="Cuando digan..." class="mb-3" required>
+                            <textarea id="t-res" placeholder="Responder..." class="h-28 mb-4" required></textarea>
+                            <div class="mb-4">
+                                <label class="block text-sm text-zinc-400 mb-2">Tipo:</label>
+                                <div class="media-type-selector">
+                                    <button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="inline w-4 h-4"></i> Texto</button>
+                                    <button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="inline w-4 h-4"></i> Imagen</button>
+                                    <button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="inline w-4 h-4"></i> Video</button>
+                                </div>
+                            </div>
+                            <div id="media-upload" class="hidden mb-4">
+                                <label class="block text-sm text-zinc-400 mb-2">Archivos (máx 10):</label>
+                                <input type="file" id="t-media" accept="image/*,video/*" multiple>
+                                <div id="media-preview" class="media-preview-container"></div>
+                            </div>
+                            <button type="submit" class="w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Guardar</button>
+                        </form>
                     </div>
-                    <div id="t-list" class="space-y-3"></div>
+                    <div id="l-train" class="lg:col-span-2 space-y-3"></div>
                 </div>
             </div>
 
-            <!-- RECORDATORIOS -->
+            <!-- ========== APRENDER ========== -->
+            <div id="p-learn" class="page">
+                <h2 class="text-2xl font-bold gradient-text mb-4">Bandeja de Aprendizaje</h2>
+                <p class="text-zinc-500 text-sm mb-4">Conversaciones que el bot no supo responder</p>
+                <div id="l-learn" class="space-y-3"></div>
+            </div>
+
+            <!-- ========== RECORDATORIOS ========== -->
             <div id="p-rem" class="page">
-                <div class="max-w-3xl mx-auto space-y-6">
-                    <div class="glass p-6 rounded-3xl">
-                        <h3 class="font-bold mb-4">Nuevo Recordatorio</h3>
+                <h2 class="text-2xl font-bold gradient-text mb-4">Recordatorios</h2>
+                <div class="glass p-4 sm:p-8 rounded-2xl mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-base sm:text-lg">Programar Recordatorio</h3>
+                        <span id="rem-clock" class="text-xs text-zinc-500 font-mono"></span>
+                    </div>
+                    <p class="text-xs text-zinc-500 mb-4">⏰ Hora República Dominicana (UTC-4)</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                         <input type="hidden" id="r-id">
-                        <div class="grid grid-cols-2 gap-4">
-                            <input type="text" id="r-name" placeholder="Nombre cliente" class="p-4 rounded-xl outline-none">
-                            <input type="text" id="r-phone" placeholder="Número (ej: 18491234567)" class="p-4 rounded-xl outline-none">
-                            <input type="text" id="r-msg" placeholder="Mensaje a enviar" class="col-span-2 p-4 rounded-xl outline-none">
-                            <select id="r-freq" class="p-4 rounded-xl outline-none">
-                                <option>Una vez</option>
-                                <option>Diario</option>
-                                <option>Semanal</option>
-                                <option>Mensual</option>
-                                <option>Anual</option>
-                            </select>
-                            <input type="datetime-local" id="r-date" class="p-4 rounded-xl outline-none">
-                        </div>
-                        <button onclick="saveR()" class="w-full py-4 bg-green-600 rounded-xl font-bold mt-4">AGENDAR</button>
+                        <input type="text" id="r-name" placeholder="Nombre">
+                        <input type="text" id="r-phone" placeholder="Número (ej: 18091234567)">
+                        <textarea id="r-msg" placeholder="Mensaje" rows="3" class="sm:col-span-2 lg:col-span-2 resize-none"></textarea>
+                        <select id="r-freq"><option>Una vez</option><option>Diario</option><option>Semanal</option><option>Mensual</option><option>Anual</option></select>
+                        <input type="datetime-local" id="r-date">
                     </div>
-                    <div id="r-list" class="space-y-2"></div>
+                    <button onclick="saveRem()" class="mt-4 w-full sm:w-auto px-8 py-3 bg-emerald-600 rounded-2xl font-bold hover:bg-emerald-700 transition">Programar</button>
                 </div>
+                <div id="l-rem" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
             </div>
 
-            <!-- EXCLUIDOS -->
+            <!-- ========== EXCLUIDOS ========== -->
             <div id="p-excl" class="page">
-                <div class="max-w-xl mx-auto space-y-6">
-                    <div class="glass p-6 rounded-3xl">
-                        <h3 class="font-bold mb-4">Ignorar Número</h3>
-                        <div class="flex gap-2">
-                            <input type="text" id="e-name" placeholder="Nombre" class="w-1/2 p-4 rounded-xl outline-none">
-                            <input type="text" id="e-phone" placeholder="WhatsApp" class="w-1/2 p-4 rounded-xl outline-none">
-                        </div>
-                        <button onclick="saveE()" class="w-full py-4 bg-zinc-800 rounded-xl font-bold mt-4">AÑADIR A LA LISTA</button>
+                <h2 class="text-2xl font-bold gradient-text mb-4">Números Excluidos</h2>
+                <div class="w-full max-w-xl mx-auto glass p-4 sm:p-8 rounded-2xl">
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input type="text" id="e-name" placeholder="Nombre" class="flex-1">
+                        <input type="text" id="e-phone" placeholder="Número" class="flex-1">
+                        <button onclick="saveExcl()" class="bg-white text-black px-6 py-3 font-bold rounded-xl hover:bg-zinc-200 transition whitespace-nowrap">Añadir</button>
                     </div>
-                    <div id="e-list" class="space-y-2"></div>
+                    <div id="l-excl" class="mt-6 space-y-2"></div>
                 </div>
             </div>
 
-            <!-- AJUSTES -->
+            <!-- ========== AJUSTES ========== -->
             <div id="p-config" class="page">
-                <div class="max-w-md mx-auto glass p-8 rounded-3xl">
-                    <h3 class="font-bold mb-6 flex items-center gap-2"><i data-lucide="shield"></i> Seguridad Panel</h3>
-                    <div class="space-y-4">
-                        <div>
-                            <label class="text-[10px] uppercase text-gray-500 font-bold ml-1">Nuevo Usuario</label>
-                            <input type="text" id="conf-user" class="w-full p-4 rounded-xl mt-1 outline-none">
+                <h2 class="text-2xl font-bold gradient-text mb-4">Configuración</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 max-w-4xl mx-auto">
+                    <div class="glass p-5 sm:p-10 rounded-2xl">
+                        <h2 class="text-xl sm:text-2xl font-bold mb-6">Credenciales de Acceso</h2>
+                        <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-3">
+                        <input type="password" id="conf-pass" placeholder="Nueva Contraseña" class="mb-6">
+                        <button onclick="saveCredentials()" class="w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Actualizar</button>
+                    </div>
+                    <div class="glass p-5 sm:p-10 rounded-2xl">
+                        <h2 class="text-xl sm:text-2xl font-bold mb-4">Copias de Seguridad</h2>
+                        <div class="mb-5">
+                            <p class="text-xs sm:text-sm text-zinc-400 mb-2">Número para backups:</p>
+                            <div class="flex gap-2">
+                                <input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="flex-1">
+                                <button onclick="saveBackupPhone()" class="px-4 py-3 bg-emerald-600 rounded-xl font-bold hover:bg-emerald-700 transition flex items-center gap-1 text-sm whitespace-nowrap">
+                                    <i data-lucide="save" class="w-4 h-4"></i> Guardar
+                                </button>
+                            </div>
+                            <p id="phone-saved-msg" class="text-xs mt-2 hidden"></p>
                         </div>
-                        <div>
-                            <label class="text-[10px] uppercase text-gray-500 font-bold ml-1">Nueva Contraseña</label>
-                            <input type="password" id="conf-pass" class="w-full p-4 rounded-xl mt-1 outline-none">
+                        <div class="space-y-2">
+                            <button onclick="downloadBackup()" class="w-full py-3 bg-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition text-sm">
+                                <i data-lucide="download" class="w-4 h-4"></i>Descargar Backup
+                            </button>
+                            <button onclick="sendBackupManually()" class="w-full py-3 bg-blue-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition text-sm">
+                                <i data-lucide="send" class="w-4 h-4"></i>Enviar a WhatsApp
+                            </button>
+                            <button onclick="document.getElementById('restore-file').click()" class="w-full py-3 bg-orange-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-orange-700 transition text-sm">
+                                <i data-lucide="upload" class="w-4 h-4"></i>Restaurar Backup
+                            </button>
+                            <input type="file" id="restore-file" accept=".json" class="hidden" onchange="restoreBackup(this)">
                         </div>
-                        <button onclick="saveConfig()" class="w-full py-4 bg-blue-600 rounded-xl font-bold">ACTUALIZAR CREDENCIALES</button>
+                        <p class="text-xs text-zinc-500 mt-4">💡 Backup diario 12:00 AM hora RD.</p>
                     </div>
                 </div>
             </div>
-        </main>
-    </div>
+        </div>
+    </main>
 
     <script>
         const socket = io();
-        let currentDB = { training:[], reminders:[], excluded:[], stats:{} };
+        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0 }, backupPhone:'' };
+        let currentMediaType = 'text';
+        let selectedFiles = [];
 
         function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); }
 
         function nav(id) {
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
             document.getElementById('p-'+id).classList.add('active');
-            document.getElementById('btn-'+id).classList.add('active');
-            if(window.innerWidth < 1024) toggleSidebar();
+            document.getElementById('n-'+id).classList.add('active');
             lucide.createIcons();
         }
 
-        socket.on('bot_status', s => {
-            document.getElementById('bot-status-text').innerText = s;
-            const dot = document.getElementById('status-dot');
-            dot.className = `w-2 h-2 rounded-full ${s === 'Conectado' ? 'bg-green-500' : 'bg-orange-500 animate-pulse'}`;
-            
-            if(s === 'Conectado') {
-                document.getElementById('qr-img').innerHTML = '<div class="text-green-500"><i data-lucide="check-circle" class="w-12 h-12"></i></div>';
-                document.getElementById('active-actions').classList.remove('hidden');
-                document.getElementById('conn-desc').classList.add('hidden');
-                lucide.createIcons();
+        function updateClock() {
+            const now = new Date();
+            const rdTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santo_Domingo' }));
+            const h = String(rdTime.getHours()).padStart(2,'0');
+            const m = String(rdTime.getMinutes()).padStart(2,'0');
+            const s = String(rdTime.getSeconds()).padStart(2,'0');
+            const timeStr = h + ':' + m + ':' + s + ' RD';
+            const el1 = document.getElementById('server-clock');
+            const el2 = document.getElementById('rem-clock');
+            if (el1) el1.textContent = '🕐 ' + timeStr;
+            if (el2) el2.textContent = '🕐 ' + timeStr;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        function setMediaType(type) {
+            currentMediaType = type;
+            document.querySelectorAll('.media-type-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('mt-'+type).classList.add('active');
+            if (type === 'text') {
+                document.getElementById('media-upload').classList.add('hidden');
+                selectedFiles = [];
             } else {
-                document.getElementById('active-actions').classList.add('hidden');
-                document.getElementById('conn-desc').classList.remove('hidden');
+                document.getElementById('media-upload').classList.remove('hidden');
+                document.getElementById('t-media').accept = type === 'image' ? 'image/*' : 'video/*';
             }
+            lucide.createIcons();
+        }
+
+        document.getElementById('t-media')?.addEventListener('change', function(e) {
+            const files = Array.from(e.target.files);
+            if (files.length > 10) { alert('Máximo 10'); return; }
+            selectedFiles = files;
+            const preview = document.getElementById('media-preview');
+            preview.innerHTML = '';
+            files.forEach((file, index) => {
+                const reader = new FileReader();
+                reader.onload = function(ev) {
+                    const div = document.createElement('div');
+                    div.className = 'media-item';
+                    if (file.type.startsWith('image/')) {
+                        div.innerHTML = '<img src="'+ev.target.result+'" class="media-preview"><div class="media-remove" onclick="removeMediaFile('+index+')">×</div>';
+                    } else {
+                        div.innerHTML = '<video src="'+ev.target.result+'" class="media-preview" controls></video><div class="media-remove" onclick="removeMediaFile('+index+')">×</div>';
+                    }
+                    preview.appendChild(div);
+                };
+                reader.readAsDataURL(file);
+            });
         });
 
-        socket.on('bot_qr', url => {
-            if(url) {
-                document.getElementById('qr-img').innerHTML = `<img src="${url}" class="w-48 h-48">`;
+        function removeMediaFile(index) {
+            selectedFiles.splice(index, 1);
+            const dt = new DataTransfer();
+            selectedFiles.forEach(file => dt.items.add(file));
+            document.getElementById('t-media').files = dt.files;
+            document.getElementById('t-media').dispatchEvent(new Event('change'));
+        }
+
+        // Mostrar QR en el contenedor
+        function showQR(url) {
+            const qrImg = document.getElementById('qr-img');
+            if (qrImg) {
+                qrImg.innerHTML = '<img src="'+url+'" class="w-full">';
             }
+        }
+
+        // Limpiar QR y mostrar texto de espera
+        function clearQR() {
+            const qrImg = document.getElementById('qr-img');
+            if (qrImg) {
+                qrImg.innerHTML = '<span class="text-sm text-gray-500">Esperando código QR...</span>';
+            }
+        }
+
+        socket.on('status_update', s => {
+            document.getElementById('bot-status').innerText = s;
+            document.getElementById('dot').className = s === 'Conectado'
+                ? 'w-2.5 h-2.5 rounded-full bg-green-500'
+                : 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse';
         });
 
-        socket.on('update_ui', data => { currentDB = data; render(); });
+        socket.on('connection_status', data => {
+            if (data.connected) {
+                document.getElementById('qr-container').classList.add('hidden');
+                document.getElementById('connected-container').classList.remove('hidden');
+                document.getElementById('btn-logout-wa').classList.remove('hidden');
+                clearQR();
+            } else {
+                document.getElementById('qr-container').classList.remove('hidden');
+                document.getElementById('connected-container').classList.add('hidden');
+                document.getElementById('btn-logout-wa').classList.add('hidden');
+            }
+            lucide.createIcons();
+        });
+
+        socket.on('qr_update', url => {
+            showQR(url);
+        });
+
+        socket.on('qr_clear', () => {
+            clearQR();
+        });
+
+        socket.on('data_update', data => { db = data; render(); });
 
         async function load() {
-            const res = await fetch('/api/data');
-            const data = await res.json();
-            currentDB = data;
-            
-            // Forzar UI de conexión si ya está conectado
-            if(data.botStatus === 'Conectado') {
-                socket.emit('request_status'); // Pedir actualización
-                document.getElementById('bot-status-text').innerText = "Conectado";
-                document.getElementById('status-dot').className = "w-2 h-2 rounded-full bg-green-500";
-                document.getElementById('qr-img').innerHTML = '<div class="text-green-500"><i data-lucide="check-circle" class="w-12 h-12"></i></div>';
-                document.getElementById('active-actions').classList.remove('hidden');
-                document.getElementById('conn-desc').classList.add('hidden');
-            } else if(data.qrCode) {
-                // Si hay un QR pendiente lo generamos
-                socket.emit('get_last_qr'); 
-            }
-            render();
-            lucide.createIcons();
+            try {
+                const res = await fetch('/api/data');
+                if (res.status === 401) { location.href = '/login'; return; }
+                const data = await res.json();
+                db = data;
+
+                if (data.isConnected) {
+                    document.getElementById('qr-container').classList.add('hidden');
+                    document.getElementById('connected-container').classList.remove('hidden');
+                    document.getElementById('btn-logout-wa').classList.remove('hidden');
+                    document.getElementById('bot-status').innerText = 'Conectado';
+                    document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-green-500';
+                    clearQR();
+                } else {
+                    document.getElementById('bot-status').innerText = data.botStatus || 'Desconectado';
+                    document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse';
+                }
+
+                document.getElementById('conf-backup-phone').value = data.backupPhone || '';
+                render();
+                lucide.createIcons();
+            } catch(e) { console.error(e); }
+        }
+
+        function esc(text) {
+            if (!text) return '';
+            const d = document.createElement('div');
+            d.appendChild(document.createTextNode(text));
+            return d.innerHTML;
+        }
+
+        function formatReminderDate(dateStr) {
+            if (!dateStr) return '';
+            try {
+                const d = new Date(dateStr);
+                const day = String(d.getDate()).padStart(2,'0');
+                const month = String(d.getMonth()+1).padStart(2,'0');
+                const year = d.getFullYear();
+                const h = String(d.getHours()).padStart(2,'0');
+                const m = String(d.getMinutes()).padStart(2,'0');
+                const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
+                const h12 = d.getHours() % 12 || 12;
+                return day+'/'+month+'/'+year+' '+h12+':'+m+' '+ampm;
+            } catch(e) { return dateStr; }
+        }
+
+        function currentRDTimestamp() {
+            return Date.now() - (4 * 60 * 60 * 1000);
         }
 
         function render() {
-            document.getElementById('s-replied').innerText = currentDB.stats.replied || 0;
-            document.getElementById('s-total').innerText = currentDB.stats.total || 0;
+            document.getElementById('s-replied').innerText = db.stats ? db.stats.replied : 0;
+            document.getElementById('s-total').innerText = db.stats ? db.stats.total : 0;
 
-            // Listas
-            document.getElementById('t-list').innerHTML = currentDB.training.map((t,i) => `
-                <div class="glass p-4 rounded-2xl flex justify-between items-center">
-                    <div><b class="text-blue-500 text-sm">${t.key}</b><p class="text-xs text-gray-400 mt-1">${t.response}</p></div>
-                    <div class="flex gap-2">
-                        <button onclick="editT(${i})" class="p-2 hover:bg-white/5 rounded-lg"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
-                        <button onclick="delT(${i})" class="p-2 text-red-500 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash" class="w-4 h-4"></i></button>
+            // Próximos recordatorios
+            const nowTS = currentRDTimestamp();
+            const upcoming = (db.reminders || [])
+                .map((r, index) => ({ ...r, index }))
+                .filter(r => {
+                    try {
+                        const dateParts = r.date.split('T');
+                        const [y, m, d] = dateParts[0].split('-').map(Number);
+                        const [h, min] = dateParts[1].split(':').map(Number);
+                        const ts = Date.UTC(y, m-1, d, h+4, min);
+                        return ts > nowTS;
+                    } catch { return false; }
+                })
+                .sort((a, b) => {
+                    try {
+                        const aParts = a.date.split('T');
+                        const bParts = b.date.split('T');
+                        const aTs = Date.UTC(...aParts[0].split('-').map(Number), ...aParts[1].split(':').map((v,i)=> i===0?Number(v)+4:Number(v)));
+                        const bTs = Date.UTC(...bParts[0].split('-').map(Number), ...bParts[1].split(':').map((v,i)=> i===0?Number(v)+4:Number(v)));
+                        return aTs - bTs;
+                    } catch { return 0; }
+                })
+                .slice(0, 5);
+
+            const upcomingEl = document.getElementById('upcoming-reminders-list');
+            if (upcoming.length === 0) {
+                upcomingEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">No hay recordatorios próximos</div>';
+            } else {
+                upcomingEl.innerHTML = upcoming.map(r => `
+                    <div class="reminder-item flex justify-between items-center">
+                        <div>
+                            <div class="font-medium">${esc(r.name)}</div>
+                            <div class="text-xs text-zinc-500">📱 ${esc(r.phone)}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-sm text-emerald-400">${formatReminderDate(r.date)}</div>
+                            <span class="badge bg-blue-500/10 text-blue-400">${r.freq}</span>
+                        </div>
                     </div>
-                </div>`).join('');
+                `).join('');
+            }
 
-            document.getElementById('r-list').innerHTML = currentDB.reminders.map((r,i) => `
-                <div class="glass p-4 rounded-2xl flex justify-between items-center border-l-4 border-green-600">
-                    <div><b class="text-sm">${r.name}</b><p class="text-[10px] text-gray-500">${r.phone} | ${r.freq}</p></div>
-                    <div class="flex gap-2">
-                        <button onclick="editR(${i})" class="p-2 hover:bg-white/5 rounded-lg"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
-                        <button onclick="delR(${i})" class="p-2 text-red-500 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash" class="w-4 h-4"></i></button>
+            // Últimos aprendizajes (hasta 5)
+            const recentLearn = (db.learning || []).slice(-5).reverse();
+            const learnEl = document.getElementById('recent-learning-list');
+            if (recentLearn.length === 0) {
+                learnEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">No hay mensajes nuevos</div>';
+            } else {
+                learnEl.innerHTML = recentLearn.map(l => `
+                    <div class="learning-item">
+                        <div class="flex justify-between items-start">
+                            <span class="text-xs text-zinc-500">${l.date} · ${l.from}</span>
+                            <button onclick="useLFromDashboard('${esc(l.text)}')" class="text-blue-400 hover:text-blue-300 text-xs font-medium">Usar</button>
+                        </div>
+                        <p class="text-sm mt-1 break-all">${esc(l.text)}</p>
                     </div>
-                </div>`).join('');
+                `).join('');
+            }
 
-            document.getElementById('e-list').innerHTML = currentDB.excluded.map((e,i) => `
-                <div class="glass p-4 rounded-2xl flex justify-between items-center">
-                    <div><b class="text-sm">${e.name}</b><p class="text-xs text-gray-500">${e.phone}</p></div>
-                    <button onclick="delE(${i})" class="p-2 text-red-500"><i data-lucide="user-minus" class="w-4 h-4"></i></button>
-                </div>`).join('');
-            
+            // Respuestas entrenadas
+            document.getElementById('l-train').innerHTML = (db.training || []).map((t,i) =>
+                '<div class="glass p-4 rounded-2xl"><div class="flex justify-between items-start mb-2 gap-2"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1 flex-wrap"><b class="text-blue-500 text-sm">P:</b><span class="text-sm break-all">'+esc(t.key)+'</span>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded">'+t.mediaPaths.length+' ARCHIVO(S)</span>' : '')+'</div><span class="text-xs sm:text-sm text-zinc-400 break-all">'+esc(t.response)+'</span></div><div class="flex gap-1 flex-shrink-0"><button onclick="editT('+i+')" class="p-2 text-zinc-500 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delT('+i+')" class="p-2 text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<div class="media-preview-container">'+t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? '<img src="/'+p+'" class="media-preview">' : '<video src="/'+p+'" class="media-preview" controls></video>').join('')+'</div>' : '')+'</div>'
+            ).join('');
+
+            // Aprendizaje completo
+            document.getElementById('l-learn').innerHTML = (!db.learning || db.learning.length === 0)
+                ? '<div class="glass p-6 rounded-2xl text-center text-zinc-500">No hay conversaciones nuevas</div>'
+                : db.learning.map((l,i) =>
+                    '<div class="glass p-3 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"><div class="min-w-0 flex-1"><small class="text-zinc-500 text-xs">'+l.date+' - '+l.from+'</small><br><b class="text-sm break-all">'+esc(l.text)+'</b>'+(l.hasMedia ? ' <span class="ml-1 text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded">MEDIA</span>' : '')+'</div><div class="flex gap-2 flex-shrink-0"><button onclick="useL('+i+')" class="bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold">Configurar</button><button onclick="delL('+i+')" class="text-red-500 p-2"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>'
+                ).join('');
+
+            // Recordatorios
+            document.getElementById('l-rem').innerHTML = (db.reminders || []).map((r,i) =>
+                '<div class="glass p-4 rounded-2xl border-l-4 border-emerald-500"><div class="flex justify-between items-start mb-2"><b class="text-base">'+esc(r.name)+'</b><div class="flex gap-1"><button onclick="editR('+i+')" class="text-zinc-400 hover:text-white p-1"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delR('+i+')" class="text-red-500 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div><p class="text-xs text-zinc-400 mb-2">📱 '+esc(r.phone)+'</p><p class="text-xs text-zinc-400 mb-2 preserve-whitespace">'+esc(r.message)+'</p><div class="flex flex-wrap gap-2"><span class="text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded">'+r.freq+'</span><span class="text-[10px] font-bold uppercase bg-blue-500/10 text-blue-400 px-2 py-1 rounded">📅 '+formatReminderDate(r.date)+'</span></div></div>'
+            ).join('');
+
+            // Excluidos
+            document.getElementById('l-excl').innerHTML = (db.excluded || []).map((e,i) =>
+                '<div class="glass p-3 rounded-xl flex justify-between items-center gap-2"><span class="text-sm break-all">'+esc(e.name)+' ('+esc(e.phone)+')</span><button onclick="delE('+i+')" class="text-red-500 flex-shrink-0 p-1"><i data-lucide="user-minus" class="w-4 h-4"></i></button></div>'
+            ).join('');
+
             lucide.createIcons();
         }
 
-        // Acciones API
-        async function saveT() {
-            const id = document.getElementById('t-id').value;
-            const key = document.getElementById('t-key').value;
-            const response = document.getElementById('t-res').value;
-            if(!key || !response) return;
-            await fetch('/api/train', { 
-                method: 'POST', 
-                headers: {'Content-Type':'application/json'}, 
-                body: JSON.stringify({id, key, response}) 
-            });
-            document.getElementById('t-id').value=""; 
-            document.getElementById('t-key').value=""; 
-            document.getElementById('t-res').value="";
-            load();
-        }
-        function editT(i) {
-            document.getElementById('t-id').value = i;
-            document.getElementById('t-key').value = currentDB.training[i].key;
-            document.getElementById('t-res').value = currentDB.training[i].response;
-            window.scrollTo(0,0);
-        }
-        async function delT(i) {
-            if(confirm("¿Eliminar esta respuesta?")) {
-                await fetch('/api/train/'+i, { method:'DELETE' });
-                load();
-            }
+        function useLFromDashboard(text) {
+            document.getElementById('t-key').value = text;
+            nav('train');
+            setTimeout(() => document.getElementById('t-res').focus(), 300);
         }
 
-        async function saveR() {
+        async function saveTrain(e) {
+            e.preventDefault();
+            const fd = new FormData();
+            fd.append('id', document.getElementById('t-id').value);
+            fd.append('key', document.getElementById('t-key').value);
+            fd.append('response', document.getElementById('t-res').value);
+            if (currentMediaType !== 'text' && selectedFiles.length > 0) selectedFiles.forEach(f => fd.append('media', f));
+            await fetch('/api/train', { method:'POST', body: fd });
+            document.getElementById('t-id').value=""; document.getElementById('t-key').value=""; document.getElementById('t-res').value="";
+            document.getElementById('t-media').value=""; document.getElementById('media-preview').innerHTML="";
+            selectedFiles=[]; setMediaType('text'); load();
+        }
+
+        function editT(i) {
+            const t = db.training[i];
+            document.getElementById('t-id').value = i; document.getElementById('t-key').value = t.key; document.getElementById('t-res').value = t.response;
+            if (t.mediaPaths && t.mediaPaths.length > 0 && t.mediaTypes && t.mediaTypes[0]) setMediaType(t.mediaTypes[0].includes('image') ? 'image' : 'video');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function delT(i) { if (confirm('¿Eliminar?')) { await fetch('/api/train/'+i, {method:'DELETE'}); load(); } }
+        function useL(i) { document.getElementById('t-key').value = db.learning[i].text; nav('train'); setTimeout(() => document.getElementById('t-res').focus(), 300); }
+        async function delL(i) { await fetch('/api/learning/'+i, {method:'DELETE'}); load(); }
+
+        async function saveRem() {
             const data = {
                 id: document.getElementById('r-id').value,
                 name: document.getElementById('r-name').value,
@@ -530,115 +1320,178 @@ cat <<'EOF' > views/index.html
                 freq: document.getElementById('r-freq').value,
                 date: document.getElementById('r-date').value
             };
-            await fetch('/api/reminders', { 
-                method: 'POST', 
-                headers: {'Content-Type':'application/json'}, 
-                body: JSON.stringify(data) 
-            });
-            document.getElementById('r-id').value="";
+            if (!data.name || !data.phone || !data.message || !data.date) { alert('Completa todos los campos'); return; }
+            await fetch('/api/reminders', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+            document.getElementById('r-id').value=""; document.getElementById('r-name').value="";
+            document.getElementById('r-phone').value=""; document.getElementById('r-msg').value=""; document.getElementById('r-date').value="";
             load();
         }
+
         function editR(i) {
-            const r = currentDB.reminders[i];
-            document.getElementById('r-id').value = i;
-            document.getElementById('r-name').value = r.name;
-            document.getElementById('r-phone').value = r.phone;
-            document.getElementById('r-msg').value = r.message;
-            document.getElementById('r-freq').value = r.freq;
-            document.getElementById('r-date').value = r.date;
-        }
-        async function delR(i) {
-            await fetch('/api/reminders/'+i, { method:'DELETE' });
-            load();
+            const r = db.reminders[i];
+            document.getElementById('r-id').value = i; document.getElementById('r-name').value = r.name;
+            document.getElementById('r-phone').value = r.phone; document.getElementById('r-msg').value = r.message;
+            document.getElementById('r-freq').value = r.freq; document.getElementById('r-date').value = r.date;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        async function saveE() {
-            const name = document.getElementById('e-name').value;
-            const phone = document.getElementById('e-phone').value;
-            await fetch('/api/exclude', { 
-                method: 'POST', 
-                headers: {'Content-Type':'application/json'}, 
-                body: JSON.stringify({name, phone}) 
-            });
-            load();
-        }
-        async function delE(i) {
-            await fetch('/api/exclude/'+i, { method:'DELETE' });
-            load();
+        async function delR(i) { if (confirm('¿Eliminar?')) { await fetch('/api/reminders/'+i, {method:'DELETE'}); load(); } }
+
+        async function saveExcl() {
+            const name = document.getElementById('e-name').value, phone = document.getElementById('e-phone').value;
+            if (!name || !phone) { alert('Completa los campos'); return; }
+            await fetch('/api/exclude', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,phone}) });
+            document.getElementById('e-name').value=""; document.getElementById('e-phone').value=""; load();
         }
 
-        async function saveConfig() {
-            const newUser = document.getElementById('conf-user').value;
-            const newPass = document.getElementById('conf-pass').value;
-            await fetch('/api/config', { 
-                method: 'POST', 
-                headers: {'Content-Type':'application/json'}, 
-                body: JSON.stringify({newUser, newPass}) 
-            });
-            alert("Credenciales actualizadas. Inicie sesión de nuevo.");
-            location.href = '/logout';
+        async function delE(i) { if (confirm('¿Eliminar?')) { await fetch('/api/exclude/'+i, {method:'DELETE'}); load(); } }
+
+        async function saveCredentials() {
+            const user = document.getElementById('conf-user').value, pass = document.getElementById('conf-pass').value;
+            if (!user && !pass) { alert('Ingresa al menos un campo'); return; }
+            await fetch('/api/config/credentials', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user,pass}) });
+            alert("Credenciales actualizadas. Inicia sesión de nuevo."); location.href='/login';
+        }
+
+        async function saveBackupPhone() {
+            const bp = document.getElementById('conf-backup-phone').value.replace(/\D/g, '');
+            const msg = document.getElementById('phone-saved-msg');
+            const res = await fetch('/api/config/backup-phone', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({backupPhone:bp}) });
+            const data = await res.json();
+            msg.classList.remove('hidden');
+            if (data.ok) { msg.textContent='✅ Número guardado'; msg.className='text-xs mt-2 text-green-500'; }
+            else { msg.textContent='❌ Error'; msg.className='text-xs mt-2 text-red-500'; }
+            setTimeout(() => msg.classList.add('hidden'), 3000);
+        }
+
+        function downloadBackup() { window.location.href='/api/backup/download'; }
+        function downloadTemplate() { window.location.href='/api/train/template'; }
+        function exportTraining() { window.location.href='/api/train/export'; }
+
+        async function sendBackupManually() {
+            const phone = document.getElementById('conf-backup-phone').value;
+            if (!phone || phone.trim()==='') { alert('⚠️ Guarda un número primero'); return; }
+            if (!confirm('¿Enviar backup ahora?')) return;
+            const res = await fetch('/api/backup/send', {method:'POST'});
+            const data = await res.json();
+            alert(data.ok ? '✅ '+data.message : '❌ '+data.message);
+        }
+
+        async function restoreBackup(input) {
+            if (!input.files[0]) return;
+            if (!confirm('⚠️ ¿Restaurar backup?')) { input.value=''; return; }
+            const fd = new FormData(); fd.append('backup', input.files[0]);
+            const res = await fetch('/api/backup/restore', {method:'POST', body:fd});
+            const data = await res.json();
+            if (data.ok) { alert('✅ Restaurado'); setTimeout(() => location.reload(), 1000); }
+            else alert('❌ Error: '+(data.error||''));
+            input.value='';
+        }
+
+        async function importTraining(input) {
+            if (!input.files[0]) return;
+            const fd = new FormData(); fd.append('file', input.files[0]);
+            const res = await fetch('/api/train/import', {method:'POST', body:fd});
+            const data = await res.json();
+            if (data.ok) alert('✅ '+data.imported+' respuestas importadas');
+            else alert('❌ Error: '+(data.error||''));
+            input.value=''; load();
         }
 
         async function logoutWA() {
-            if(confirm("¿Desvincular WhatsApp? El bot se detendrá y pedirá nuevo QR.")) {
-                await fetch('/api/logout-wa', { method: 'POST' });
-                location.reload();
+            if (confirm("¿Desvincular? Los contadores se reiniciarán.")) {
+                await fetch('/api/logout-wa', {method:'POST'});
+                setTimeout(() => location.reload(), 1500);
             }
         }
 
         window.onload = load;
+        lucide.createIcons();
     </script>
 </body>
 </html>
-EOF
+HTMLEOF
 
-# 6. Login UI (login.html)
-cat <<'EOF' > views/login.html
+# ===================== LOGIN =====================
+cat <<'LOGINEOF' > views/login.html
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login | GZMBOT</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GZMBOT | Login</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;800&display=swap" rel="stylesheet">
     <style>
-        body { background: #070709; color: white; font-family: sans-serif; }
-        .card { background: rgba(20, 20, 25, 0.6); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.05); }
+        * { box-sizing: border-box; }
+        body { background: #0a0a0f; font-family: 'Inter', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 16px; background-image: radial-gradient(circle at 50% 50%, rgba(37,99,235,0.1) 0%, transparent 60%); }
+        .glow { position: absolute; width: 600px; height: 600px; background: radial-gradient(circle, rgba(37,99,235,0.15) 0%, transparent 70%); z-index: -1; }
+        .card { background: rgba(18,18,24,0.9); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.03); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        .gradient-text {
+            background: linear-gradient(135deg, #60a5fa, #ffffff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
     </style>
 </head>
-<body class="h-screen flex items-center justify-center p-6">
-    <div class="w-full max-w-sm">
-        <div class="text-center mb-8">
-            <h1 class="text-3xl font-black italic tracking-tighter">GZMBOT</h1>
-            <p class="text-gray-500 text-xs font-bold uppercase tracking-widest mt-2">Acceso al Panel</p>
-        </div>
-        <form action="/login" method="POST" class="card p-8 rounded-[2.5rem] shadow-2xl space-y-4">
-            <input type="text" name="user" placeholder="Usuario" class="w-full p-4 rounded-2xl bg-black/40 border border-white/5 outline-none focus:border-blue-500 transition" required>
-            <input type="password" name="pass" placeholder="Contraseña" class="w-full p-4 rounded-2xl bg-black/40 border border-white/5 outline-none focus:border-blue-500 transition" required>
-            <button class="w-full py-4 bg-blue-600 rounded-2xl font-bold shadow-lg shadow-blue-600/30 hover:scale-[1.02] active:scale-95 transition">ENTRAR</button>
+<body>
+    <div class="glow"></div>
+    <div class="card p-8 sm:p-12 rounded-[2.5rem] sm:rounded-[3.5rem] w-full max-w-md shadow-2xl text-center">
+        <h1 class="text-3xl sm:text-4xl font-black mb-2 tracking-tight gradient-text">GZMBOT</h1>
+        <p class="text-blue-500 font-bold text-[10px] uppercase tracking-[0.3em] mb-8 sm:mb-10">Administrative Panel</p>
+        <form onsubmit="login(event)" class="space-y-4">
+            <input type="text" id="u" placeholder="Usuario maestro" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
+            <input type="password" id="p" placeholder="Contraseña" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
+            <button type="submit" class="w-full py-4 sm:py-5 bg-blue-600 rounded-2xl text-white font-black hover:scale-[1.02] active:scale-95 transition-all">ACCEDER AHORA</button>
         </form>
     </div>
+    <script>
+        async function login(e) {
+            e.preventDefault();
+            const r = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user:document.getElementById('u').value, pass:document.getElementById('p').value}) });
+            const d = await r.json();
+            if (d.ok) location.href='/'; else alert("Credenciales incorrectas");
+        }
+    </script>
 </body>
 </html>
-EOF
+LOGINEOF
 
-# 7. Instalación de NPM y Lanzamiento
-echo "[4/4] Finalizando instalación de paquetes..."
-npm install whatsapp-web.js qrcode express socket.io express-session puppeteer
+# ----------------------------------------------------------------------
+# 9. INSTALAR DEPENDENCIAS DE NODE Y CONFIGURAR PM2
+# ----------------------------------------------------------------------
+echo "📦 Instalando dependencias de Node.js (esto puede tomar unos minutos)..."
+cd $HOME/gzmbot
+npm install whatsapp-web.js qrcode express socket.io express-session puppeteer moment-timezone node-cron multer
+
+# Instalar PM2 globalmente y configurar
 sudo npm install -g pm2
-
-# Configurar PM2 para inicio automático
 pm2 delete gzmbot 2>/dev/null
-pm2 start app.js --name gzmbot
+pm2 start app.js --name gzmbot --env TZ=America/Santo_Domingo
 pm2 save
 pm2 startup
 
-IP_PUB=$(curl -s ifconfig.me)
-echo "===================================================="
-echo "✅ GZMBOT INSTALADO Y CORREGIDO"
-echo "===================================================="
-echo "Panel: http://$IP_PUB"
-echo "Usuario: $ADMIN_USER"
-echo "Contraseña: $ADMIN_PASS"
-echo "===================================================="
+# ----------------------------------------------------------------------
+# 10. MOSTRAR INFORMACIÓN FINAL
+# ----------------------------------------------------------------------
+IP=$(curl -s ifconfig.me)
 
+echo "===================================================="
+echo "✨ GZMBOT ENTERPRISE - INSTALACIÓN COMPLETADA"
+echo "===================================================="
+echo "🌐 PANEL: http://$IP"
+echo "👤 USUARIO: $ADMIN_USER"
+echo "🔐 PASS: $ADMIN_PASS"
+echo "🕐 TIMEZONE: America/Santo_Domingo (UTC-4)"
+echo "===================================================="
+echo "📦 CORRECCIONES APLICADAS:"
+echo "   ✅ Menú se cierra al hacer clic fuera en móvil"
+echo "   ✅ Mensajes usados desaparecen automáticamente de 'Aprender'"
+echo "   ✅ Campo de fecha más compacto y estilizado"
+echo "   ✅ QR con texto de espera y actualización en tiempo real"
+echo "   ✅ Todas las funcionalidades previas intactas"
+echo ""
+echo "👉 Espera 30 segundos y visita http://$IP"
+echo "   Ve a la sección 'Conexión' para ver el código QR."
+echo "===================================================="
