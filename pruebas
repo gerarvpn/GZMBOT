@@ -1,200 +1,130 @@
 #!/bin/bash
 
 # ============================================================
-# GZMBOT - ENTERPRISE EDITION (CORRECCIÓN TOTAL QR + DIAGNÓSTICO)
-# Versión ultra-estable para Debian/Ubuntu
+# GZMBOT - ENTERPRISE EDITION (CON DOMINIO, SSL, RETARDO Y CONTACTOS)
 # ============================================================
 
 clear
-echo "===================================================="
-echo "  🚀 GZMBOT ENTERPRISE - INSTALACIÓN MEJORADA"
-echo "  🔧 CON DIAGNÓSTICO Y CORRECCIÓN AUTOMÁTICA"
-echo "===================================================="
-echo ""
+echo "🚀 Iniciando Instalación de GZMBOT (con dominio, SSL, retardo y contactos)..."
 
-# ==================== VERIFICAR EJECUCIÓN COMO ROOT ====================
-if [[ $EUID -ne 0 ]]; then
-   echo "❌ Este script debe ejecutarse como root (sudo)" 
-   exit 1
-fi
-
-# ==================== SOLICITAR CREDENCIALES ====================
 read -p "👤 Usuario Maestro: " ADMIN_USER
 read -sp "🔐 Contraseña Maestra: " ADMIN_PASS
-echo -e "\n"
+echo ""
+read -p "🌐 Dominio para el panel (ej: bot.tudominio.com): " DOMAIN
 
-# ==================== FUNCIÓN DE DIAGNÓSTICO ====================
-diagnostico_sistema() {
-    echo "🔍 Ejecutando diagnóstico del sistema..."
-    
-    # Verificar arquitectura
-    ARCH=$(uname -m)
-    echo "📌 Arquitectura: $ARCH"
-    
-    # Verificar memoria RAM
-    MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
-    echo "📌 Memoria RAM total: ${MEM_TOTAL}MB"
-    
-    if [ $MEM_TOTAL -lt 512 ]; then
-        echo "⚠️  Poca memoria RAM detectable. Puede causar problemas."
-    fi
-    
-    # Verificar espacio en disco
-    DISK_SPACE=$(df -m $HOME | awk 'NR==2 {print $4}')
-    echo "📌 Espacio disponible: ${DISK_SPACE}MB"
-    
-    if [ $DISK_SPACE -lt 1000 ]; then
-        echo "⚠️  Poco espacio en disco. Necesitas al menos 1GB."
-    fi
-    
-    # Verificar versión de Node.js si está instalado
-    if command -v node &> /dev/null; then
-        NODE_VER=$(node -v)
-        echo "📌 Node.js detectado: $NODE_VER"
-    else
-        echo "📌 Node.js no instalado aún"
-    fi
-    
-    # Verificar dependencias críticas
-    echo "📌 Verificando dependencias del sistema..."
-    local deps_faltantes=()
-    
-    for dep in curl wget git build-essential libnss3 libatk-bridge2.0-0 libx11-xcb1 libxcb-dri3-0 libdrm2 libgbm1 libxcomposite1 libxdamage1 libxrandr2 libasound2 libpangocairo-1.0-0 libxcursor1 libxi6 libxtst6 libcups2 libxss1 libxshmfence1 fonts-liberation libappindicator3-1 libatspi2.0-0 libnspr4 libgtk-3-0 xdg-utils; do
-        if ! dpkg -l | grep -q "ii  $dep "; then
-            deps_faltantes+=($dep)
-        fi
-    done
-    
-    if [ ${#deps_faltantes[@]} -eq 0 ]; then
-        echo "✅ Todas las dependencias del sistema están instaladas"
-    else
-        echo "⚠️  Faltan ${#deps_faltantes[@]} dependencias. Se instalarán automáticamente."
-    fi
-}
+if [ -z "$DOMAIN" ]; then
+    echo "❌ Debes ingresar un dominio válido."
+    exit 1
+fi
 
-# ==================== ACTUALIZAR SISTEMA ====================
-echo "[1/7] Actualizando sistema..."
-apt-get update
-apt-get upgrade -y
-
-# ==================== EJECUTAR DIAGNÓSTICO ====================
-diagnostico_sistema
-
-# ==================== INSTALAR DEPENDENCIAS COMPLETAS ====================
-echo "[2/7] Instalando todas las dependencias necesarias..."
-apt-get install -y \
-    curl wget git \
-    build-essential \
-    libnss3 \
-    libatk-bridge2.0-0 \
-    libx11-xcb1 \
-    libxcb-dri3-0 \
-    libdrm2 \
-    libgbm1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libasound2 \
-    libpangocairo-1.0-0 \
-    libxcursor1 \
-    libxi6 \
-    libxtst6 \
-    libcups2 \
-    libxss1 \
-    libxshmfence1 \
-    fonts-liberation \
-    libappindicator3-1 \
-    libatspi2.0-0 \
-    libnspr4 \
-    libgtk-3-0 \
-    libx11-xcb1 \
-    xdg-utils \
+# ----------------------------------------------------------------------
+# 1. INSTALAR DEPENDENCIAS DEL SISTEMA Y GOOGLE CHROME STABLE
+# ----------------------------------------------------------------------
+echo "📦 Instalando dependencias del sistema y Google Chrome..."
+sudo apt-get update
+sudo apt-get install -y \
+    curl wget gnupg2 \
     ca-certificates \
     fonts-liberation \
     libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
-    libatspi2.0-0 \
+    libatk1.0-0 \
+    libc6 \
     libcairo2 \
     libcups2 \
     libdbus-1-3 \
-    libdrm2 \
+    libexpat1 \
+    libfontconfig1 \
     libgbm1 \
+    libgcc-s1 \
     libglib2.0-0 \
+    libgtk-3-0 \
     libnspr4 \
     libnss3 \
     libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
     libx11-6 \
+    libx11-xcb1 \
     libxcb1 \
     libxcomposite1 \
+    libxcursor1 \
     libxdamage1 \
     libxext6 \
     libxfixes3 \
-    libxkbcommon0 \
+    libxi6 \
     libxrandr2 \
-    x11-utils \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    xdg-utils \
     --no-install-recommends
 
-# ==================== INSTALAR CHROMIUM ====================
-echo "[3/7] Instalando Chromium Browser..."
-apt-get install -y chromium-browser chromium-codecs-ffmpeg --no-install-recommends
+# Agregar repositorio de Google Chrome e instalarlo
+wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+sudo apt-get update
+sudo apt-get install -y google-chrome-stable
 
-# Verificar instalación de Chromium
-if command -v chromium-browser &> /dev/null; then
-    CHROME_PATH=$(which chromium-browser)
-    echo "✅ Chromium instalado en: $CHROME_PATH"
-else
-    echo "⚠️  Chromium no se instaló correctamente, instalando versión alternativa..."
-    apt-get install -y chromium --no-install-recommends
-    CHROME_PATH=$(which chromium 2>/dev/null || echo "/usr/bin/chromium")
+# Verificar instalación
+if ! command -v google-chrome-stable &> /dev/null; then
+    echo "❌ Error: No se pudo instalar Google Chrome."
+    exit 1
 fi
+echo "✅ Google Chrome instalado: $(google-chrome-stable --version)"
 
-# ==================== INSTALAR NODE.JS 18 ====================
-echo "[4/7] Instalando Node.js 18..."
-curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-apt-get install -y nodejs
+# Actualizar caché de librerías
+sudo ldconfig
 
-# Verificar instalación de Node.js
-NODE_VER=$(node -v)
-echo "✅ Node.js $NODE_VER instalado"
-
-# ==================== CONFIGURAR TIMEZONE RD ====================
-echo "[5/7] Configurando zona horaria..."
-timedatectl set-timezone America/Santo_Domingo 2>/dev/null || echo "America/Santo_Domingo" > /etc/timezone
+# ----------------------------------------------------------------------
+# 2. CONFIGURAR VARIABLES DE ENTORNO PARA PUPPETEER
+# ----------------------------------------------------------------------
+export PUPPETEER_EXECUTABLE_PATH=$(which google-chrome-stable)
+export PUPPETEER_SKIP_DOWNLOAD=true
 export TZ='America/Santo_Domingo'
 
-# ==================== CREAR ESTRUCTURA DE DIRECTORIOS ====================
-echo "[6/7] Creando estructura de directorios..."
-mkdir -p /opt/gzmbot/views
-mkdir -p /opt/gzmbot/data
-mkdir -p /opt/gzmbot/media
-mkdir -p /opt/gzmbot/backups
-mkdir -p /opt/gzmbot/.wwebjs_auth
-mkdir -p /opt/gzmbot/.cache/puppeteer
-cd /opt/gzmbot
+# ----------------------------------------------------------------------
+# 3. INSTALAR NODE.JS 18
+# ----------------------------------------------------------------------
+echo "🟢 Instalando Node.js 18..."
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-# Configurar permisos
-chmod -R 755 /opt/gzmbot
+# ----------------------------------------------------------------------
+# 4. CONFIGURAR ZONA HORARIA
+# ----------------------------------------------------------------------
+sudo timedatectl set-timezone America/Santo_Domingo 2>/dev/null || true
 
-# ==================== CONFIG.JSON ====================
+# ----------------------------------------------------------------------
+# 5. CREAR ESTRUCTURA DE CARPETAS
+# ----------------------------------------------------------------------
+mkdir -p $HOME/gzmbot/views
+mkdir -p $HOME/gzmbot/data
+mkdir -p $HOME/gzmbot/media
+mkdir -p $HOME/gzmbot/backups
+cd $HOME/gzmbot
+
+# ----------------------------------------------------------------------
+# 6. CONFIG.JSON (PUERTO INTERNO 3000 + RETARDO)
+# ----------------------------------------------------------------------
 cat <<EOF > config.json
 {
   "adminUser": "$ADMIN_USER",
   "adminPassword": "$ADMIN_PASS",
-  "port": 80,
+  "port": 3000,
   "sessionSecret": "$(openssl rand -hex 24)",
-  "backupPhone": ""
+  "backupPhone": "",
+  "responseDelay": 0
 }
 EOF
 
-# ==================== BACKEND (APP.JS) ULTRA-MEJORADO ====================
+# ----------------------------------------------------------------------
+# 7. BACKEND (app.js) - CON RETARDO, SEGURIDAD Y CONTACTOS
+# ----------------------------------------------------------------------
 cat <<'APPEOF' > app.js
 // Forzar timezone del proceso a RD
 process.env.TZ = 'America/Santo_Domingo';
-
-// Configuración de Puppeteer para entornos headless
-process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = 'false';
-process.env.PUPPETEER_EXECUTABLE_PATH = '/usr/bin/chromium-browser';
 
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
@@ -207,45 +137,20 @@ const path = require('path');
 const cron = require('node-cron');
 const moment = require('moment-timezone');
 const multer = require('multer');
-const { exec } = require('child_process');
 
 const TZ = 'America/Santo_Domingo';
 const app = express();
+app.set('trust proxy', 1); // Confiamos en el proxy (nginx)
+
 const server = http.createServer(app);
-const io = socketIo(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
-});
+const io = socketIo(server);
 
 const DB_PATH = path.join(__dirname, 'data/database.json');
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const MEDIA_PATH = path.join(__dirname, 'media');
 const BACKUP_PATH = path.join(__dirname, 'backups');
 const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
-const CHROME_PATH = '/usr/bin/chromium-browser';
 
-// Verificar existencia de Chromium
-if (!fs.existsSync(CHROME_PATH)) {
-    console.log('⚠️ Chromium no encontrado en la ruta predeterminada, buscando...');
-    // Intentar encontrar chromium en otras ubicaciones comunes
-    const possiblePaths = [
-        '/usr/bin/chromium',
-        '/usr/bin/chromium-browser',
-        '/snap/bin/chromium'
-    ];
-    
-    for (const p of possiblePaths) {
-        if (fs.existsSync(p)) {
-            process.env.PUPPETEER_EXECUTABLE_PATH = p;
-            console.log(`✅ Chromium encontrado en: ${p}`);
-            break;
-        }
-    }
-}
-
-// Inicializar DB si no existe
 if (!fs.existsSync(DB_PATH)) {
     fs.writeFileSync(DB_PATH, JSON.stringify({
         training: [], reminders: [], excluded: [], learning: [],
@@ -272,206 +177,138 @@ app.use(session({
     secret: config.sessionSecret,
     resave: false,
     saveUninitialized: true,
-    cookie: { maxAge: 86400000 }
+    cookie: {
+        maxAge: 86400000,
+        httpOnly: true,
+        secure: true,      // Solo HTTPS
+        sameSite: 'lax'
+    }
 }));
 
 const getDB = () => JSON.parse(fs.readFileSync(DB_PATH));
 const saveDB = (data) => fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
 
+// Función para obtener hora actual de RD
 function nowRD() {
     return moment().tz(TZ);
 }
 
+// Helper para delay
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 let client;
 let botStatus = "Desconectado";
 let lastQR = null;
+let lastQRImage = null;
 let isConnected = false;
-let qrGenerationAttempts = 0;
-let clientInitialized = false;
+let contacts = []; // Lista de contactos { id, name, number }
 
 console.log('🕐 Hora del servidor:', new Date().toString());
 console.log('🕐 Hora RD (moment):', nowRD().format('DD/MM/YYYY HH:mm:ss'));
 console.log('🕐 Timezone configurado:', TZ);
-console.log('🖥️  Chromium path:', process.env.PUPPETEER_EXECUTABLE_PATH || CHROME_PATH);
 
-// Función para limpiar sesión
-function cleanAuthSession() {
-    console.log('🧹 Limpiando sesión anterior...');
-    if (fs.existsSync(AUTH_PATH)) {
+io.on('connection', (socket) => {
+    console.log('Cliente conectado al socket');
+    if (lastQRImage) {
+        socket.emit('qr_update', lastQRImage);
+    }
+    // Enviar contactos al conectar
+    socket.emit('contacts_update', contacts);
+});
+
+// Actualizar contactos periódicamente
+setInterval(async () => {
+    if (isConnected && client) {
         try {
-            fs.rmSync(AUTH_PATH, { recursive: true, force: true });
-            console.log('✅ Sesión eliminada');
+            const rawContacts = await client.getContacts();
+            // Filtrar solo contactos que no sean grupos ni broadcasts
+            contacts = rawContacts
+                .filter(c => c.id.server === 'c.us' && c.number) // Solo números individuales
+                .map(c => ({
+                    id: c.id._serialized,
+                    name: c.name || c.pushname || c.number,
+                    number: c.number
+                }));
+            io.emit('contacts_update', contacts);
+            console.log('📇 Contactos actualizados:', contacts.length);
         } catch (e) {
-            console.error('❌ Error eliminando sesión:', e.message);
+            console.error('Error obteniendo contactos:', e);
         }
     }
-    
-    // Limpiar también la caché de Puppeteer
-    const puppeteerCache = path.join(__dirname, '.cache');
-    if (fs.existsSync(puppeteerCache)) {
-        try {
-            fs.rmSync(puppeteerCache, { recursive: true, force: true });
-            console.log('✅ Caché de Puppeteer eliminada');
-        } catch (e) {
-            console.error('❌ Error eliminando caché:', e.message);
-        }
-    }
-}
+}, 30000); // cada 30 segundos
 
-// Verificar conectividad a Internet
-function checkInternet() {
-    return new Promise((resolve) => {
-        exec('ping -c 1 google.com', (error) => {
-            resolve(!error);
-        });
-    });
-}
-
-// Inicializar bot con configuración ultra-robusta
-async function initBot() {
-    if (clientInitialized) {
-        console.log('⚠️ Cliente ya inicializado, cerrando anterior...');
-        try {
-            await client.destroy();
-        } catch (e) {
-            console.error('Error destruyendo cliente anterior:', e.message);
-        }
-    }
-    
-    // Verificar internet
-    const hasInternet = await checkInternet();
-    if (!hasInternet) {
-        console.error('❌ Sin conexión a Internet. Verifica tu conexión.');
-        botStatus = "Sin Internet";
-        io.emit('status_update', botStatus);
-        setTimeout(initBot, 30000); // Reintentar en 30 segundos
-        return;
-    }
-    
-    console.log('🔄 Inicializando cliente de WhatsApp...');
-    
-    // Limpiar si hay muchos intentos fallidos
-    if (qrGenerationAttempts > 3) {
-        cleanAuthSession();
-        qrGenerationAttempts = 0;
-    }
-    
-    const puppeteerConfig = {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--disable-gpu',
-            '--disable-software-rasterizer',
-            '--disable-features=VizDisplayCompositor',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--disable-web-security',
-            '--disable-features=BlockInsecurePrivateNetworkRequests',
-            '--disable-features=OutOfBlinkCors',
-            '--disable-webgl',
-            '--disable-font-subpixel-positioning',
-            '--disable-lcd-text',
-            '--disable-default-apps',
-            '--disable-extensions',
-            '--disable-component-extensions-with-background-pages',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            '--window-size=1920,1080',
-            '--start-maximized',
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--disable-client-side-phishing-detection',
-            '--disable-component-update',
-            '--disable-sync',
-            '--disable-breakpad',
-            '--disable-ipc-flooding-protection',
-            '--disable-background-networking',
-            '--metrics-recording-only',
-            '--mute-audio'
-        ]
-    };
-    
-    // Usar el executable path si está disponible
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-        puppeteerConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-    }
-    
+function initBot() {
     client = new Client({
-        authStrategy: new LocalAuth({ 
-            dataPath: AUTH_PATH,
-            clientId: 'gzmbot-main-client' 
-        }),
-        puppeteer: puppeteerConfig,
-        webVersionCache: {
-            type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+        authStrategy: new LocalAuth({ dataPath: AUTH_PATH }),
+        puppeteer: {
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         }
     });
 
     client.on('qr', (qr) => {
-        console.log('📲 QR generado correctamente');
         botStatus = "Esperando QR";
         isConnected = false;
         lastQR = qr;
         qrcode.toDataURL(qr, (err, url) => {
-            if (err) {
-                console.error('❌ Error generando imagen QR:', err);
-                return;
+            if (!err) {
+                lastQRImage = url;
+                io.emit('qr_update', url);
+            } else {
+                console.error('Error generando QR:', err);
+                lastQRImage = null;
             }
-            io.emit('qr_update', url);
             io.emit('connection_status', { connected: false, status: botStatus });
             io.emit('status_update', botStatus);
-            console.log('✅ QR enviado al cliente web');
         });
-        qrGenerationAttempts++;
     });
 
-    client.on('ready', () => {
+    client.on('ready', async () => {
         botStatus = "Conectado";
         isConnected = true;
         lastQR = null;
-        qrGenerationAttempts = 0;
-        clientInitialized = true;
+        lastQRImage = null;
         io.emit('status_update', botStatus);
         io.emit('connection_status', { connected: true, status: botStatus });
-        console.log('✅✅✅ BOT CONECTADO EXITOSAMENTE -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+        console.log('✅ Bot conectado -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+
+        // Cargar contactos iniciales
+        try {
+            const rawContacts = await client.getContacts();
+            contacts = rawContacts
+                .filter(c => c.id.server === 'c.us' && c.number)
+                .map(c => ({
+                    id: c.id._serialized,
+                    name: c.name || c.pushname || c.number,
+                    number: c.number
+                }));
+            io.emit('contacts_update', contacts);
+            console.log('📇 Contactos cargados inicialmente:', contacts.length);
+        } catch (e) {
+            console.error('Error cargando contactos iniciales:', e);
+        }
     });
 
-    client.on('authenticated', () => {
-        console.log('🔐 Autenticación exitosa');
-    });
+    client.on('authenticated', () => console.log('🔐 Autenticado'));
 
     client.on('auth_failure', (msg) => {
-        console.error('❌ Fallo de autenticación:', msg);
+        console.error('❌ Auth failure:', msg);
         botStatus = "Error de autenticación";
         io.emit('status_update', botStatus);
-        qrGenerationAttempts++;
-        
-        if (qrGenerationAttempts > 5) {
-            console.log('🔄 Demasiados fallos, limpiando sesión...');
-            cleanAuthSession();
-            qrGenerationAttempts = 0;
-        }
     });
 
     client.on('disconnected', (reason) => {
         botStatus = "Desconectado";
         isConnected = false;
-        clientInitialized = false;
+        lastQR = null;
+        lastQRImage = null;
+        contacts = [];
         io.emit('status_update', botStatus);
         io.emit('connection_status', { connected: false, status: botStatus });
+        io.emit('qr_clear');
+        io.emit('contacts_update', []);
         console.log('❌ Bot desconectado:', reason);
-        
-        // Reintentar conexión después de 10 segundos
-        setTimeout(() => {
-            if (!isConnected) {
-                console.log('🔄 Reintentando conexión...');
-                initBot();
-            }
-        }, 10000);
     });
 
     client.on('message', async (msg) => {
@@ -491,6 +328,12 @@ async function initBot() {
             });
 
             if (trigger) {
+                // Leer configuración actual (incluye retardo)
+                const config = getConfig();
+                if (config.responseDelay > 0) {
+                    await delay(config.responseDelay * 1000);
+                }
+
                 if (trigger.mediaPaths && trigger.mediaPaths.length > 0) {
                     try {
                         const firstMedia = MessageMedia.fromFilePath(trigger.mediaPaths[0]);
@@ -525,18 +368,7 @@ async function initBot() {
         }
     });
 
-    try {
-        console.log('🚀 Iniciando cliente...');
-        await client.initialize();
-        console.log('✅ Cliente inicializado correctamente');
-    } catch (e) {
-        console.error('❌ Error al iniciar cliente:', e);
-        botStatus = "Error de inicialización";
-        io.emit('status_update', botStatus);
-        
-        // Reintentar después de 15 segundos
-        setTimeout(initBot, 15000);
-    }
+    client.initialize().catch(e => console.error("Error al iniciar:", e));
 }
 
 async function createBackup() {
@@ -642,8 +474,7 @@ cron.schedule('* * * * *', () => {
 
 console.log('⏰ Recordatorios activos - verificando cada minuto en hora RD');
 
-// Iniciar el bot después de 2 segundos (para asegurar que todo esté listo)
-setTimeout(initBot, 2000);
+initBot();
 
 const checkAuth = (req, res, next) => req.session.user ? next() : res.status(401).send("Unauthorized");
 
@@ -660,15 +491,19 @@ app.post('/login', (req, res) => {
 
 app.get('/api/data', checkAuth, (req, res) => {
     res.json({
-        ...getDB(), 
-        botStatus, 
-        qr: lastQR, 
+        ...getDB(),
+        botStatus,
+        qr: lastQR,
         isConnected,
         backupPhone: getConfig().backupPhone || '',
+        responseDelay: getConfig().responseDelay || 0,
         serverTime: nowRD().format('DD/MM/YYYY HH:mm:ss'),
-        timezone: TZ,
-        chromePath: process.env.PUPPETEER_EXECUTABLE_PATH || 'No encontrado'
+        timezone: TZ
     });
+});
+
+app.get('/api/contacts', checkAuth, (req, res) => {
+    res.json(contacts);
 });
 
 app.get('/api/server-time', checkAuth, (req, res) => {
@@ -696,7 +531,17 @@ app.post('/api/train', checkAuth, upload.array('media', 10), (req, res) => {
     } else {
         db.training.push(trainData);
     }
-    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+
+    if (key) {
+        const index = db.learning.findIndex(l => l.text.toLowerCase().trim() === key.toLowerCase().trim());
+        if (index !== -1) {
+            db.learning.splice(index, 1);
+        }
+    }
+
+    saveDB(db);
+    io.emit('data_update', db);
+    res.json({ ok: true });
 });
 
 app.delete('/api/train/:id', checkAuth, (req, res) => {
@@ -800,6 +645,15 @@ app.post('/api/config/backup-phone', checkAuth, (req, res) => {
     res.json({ ok: true });
 });
 
+// Endpoint para configurar retardo
+app.post('/api/config/delay', checkAuth, (req, res) => {
+    const fc = getConfig();
+    fc.responseDelay = parseFloat(req.body.delay) || 0;
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
+    io.emit('config_update', { responseDelay: fc.responseDelay });
+    res.json({ ok: true });
+});
+
 app.get('/api/backup/download', checkAuth, async (req, res) => {
     try {
         const bf = await createBackup();
@@ -841,40 +695,30 @@ app.post('/api/logout-wa', checkAuth, async (req, res) => {
         if (fs.existsSync(AUTH_PATH)) fs.rmSync(AUTH_PATH, { recursive: true, force: true });
         isConnected = false;
         botStatus = "Desconectado";
-        clientInitialized = false;
+        lastQRImage = null;
+        contacts = [];
         const db = getDB();
         db.stats.replied = 0;
         db.stats.total = 0;
         saveDB(db);
         io.emit('data_update', db);
+        io.emit('qr_clear');
+        io.emit('contacts_update', []);
         res.json({ ok: true });
         setTimeout(() => process.exit(0), 1000);
     } catch (e) { res.status(500).send(e.message); }
 });
 
-server.listen(config.port, '0.0.0.0', () => {
-    console.log('🚀 GZMBOT ONLINE en puerto', config.port);
+server.listen(config.port, '127.0.0.1', () => {
+    console.log('🚀 GZMBOT ONLINE en puerto', config.port, '(solo local)');
     console.log('🕐 Hora actual RD:', nowRD().format('DD/MM/YYYY HH:mm:ss'));
     console.log('📅 Próximo backup: 12:00 AM hora RD');
-    console.log('📱 Panel web disponible en http://localhost:' + config.port);
-});
-
-// Manejar cierre graceful
-process.on('SIGINT', async () => {
-    console.log('🛑 Cerrando aplicación...');
-    if (client) {
-        try {
-            await client.destroy();
-            console.log('✅ Cliente de WhatsApp cerrado');
-        } catch (e) {
-            console.error('Error cerrando cliente:', e.message);
-        }
-    }
-    process.exit(0);
 });
 APPEOF
 
-# ==================== INDEX HTML (SIN CAMBIOS) =====================
+# ----------------------------------------------------------------------
+# 8. FRONTEND (index.html) - CON SELECTOR DE CONTACTOS
+# ----------------------------------------------------------------------
 cat <<'HTMLEOF' > views/index.html
 <!DOCTYPE html>
 <html lang="es">
@@ -885,156 +729,347 @@ cat <<'HTMLEOF' > views/index.html
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #0a0a0f; color: #ffffff; font-family: 'Plus Jakarta Sans', sans-serif; }
-        .glass { background: rgba(20, 20, 30, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); border-radius: 24px; box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5); }
-        .glass-card { background: rgba(25, 25, 35, 0.8); border: 1px solid rgba(255,255,255,0.03); border-radius: 20px; transition: all 0.2s ease; }
-        .glass-card:hover { border-color: rgba(37, 99, 235, 0.3); transform: translateY(-2px); box-shadow: 0 20px 30px -10px rgba(37,99,235,0.2); }
-        .sidebar-item { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-radius: 18px; color: #a1a1aa; transition: all 0.3s; cursor: pointer; font-weight: 500; }
-        .sidebar-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
-        .sidebar-item.active { background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); color: #fff; box-shadow: 0 10px 20px -5px rgba(37, 99, 235, 0.5); }
-        .page { display: none; animation: fadeIn 0.3s ease-out; }
-        .page.active { display: block; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        input, select, textarea {
-            background: #1a1a24 !important; border: 1px solid #2a2a35 !important;
-            color: #fff !important; padding: 12px 16px !important; border-radius: 16px !important;
-            outline: none; width: 100%; font-size: 15px; transition: border 0.2s;
+        body {
+            background: #0a0a0f;
+            color: #f4f4f5;
+            font-family: 'Inter', sans-serif;
+            background-image: radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.03) 0%, transparent 50%);
         }
-        input:focus, textarea:focus { border-color: #2563eb !important; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 10px; }
-        .media-preview { max-width: 100px; max-height: 100px; border-radius: 12px; margin: 4px; object-fit: cover; border: 2px solid #2a2a35; }
+        .glass {
+            background: rgba(18, 18, 24, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        .glass-card {
+            background: rgba(24, 24, 32, 0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.02);
+            border-radius: 24px;
+            transition: transform 0.2s ease, border-color 0.2s;
+        }
+        .glass-card:hover {
+            border-color: rgba(37, 99, 235, 0.3);
+            transform: translateY(-2px);
+        }
+        .sidebar-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 14px;
+            color: #a1a1aa;
+            transition: all 0.2s;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .sidebar-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            color: #fff;
+        }
+        .sidebar-item.active {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+            box-shadow: 0 8px 20px -8px #2563eb80;
+        }
+        .page {
+            display: none;
+            animation: fadeIn 0.3s ease-out;
+        }
+        .page.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        input, select, textarea {
+            background: #0f0f13 !important;
+            border: 1px solid #27272a !important;
+            color: #fff !important;
+            padding: 12px 16px !important;
+            border-radius: 14px !important;
+            outline: none;
+            width: 100%;
+            font-size: 15px;
+            transition: border 0.2s;
+        }
+        input[type="datetime-local"] {
+            padding: 10px 12px !important;
+            font-size: 14px !important;
+            min-height: 45px;
+        }
+        input:focus, textarea:focus, select:focus {
+            border-color: #2563eb !important;
+        }
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3f3f46;
+            border-radius: 10px;
+        }
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            line-height: 1;
+            color: #e5e7eb;
+        }
+        .badge {
+            padding: 4px 10px;
+            border-radius: 30px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+        .reminder-item, .learning-item {
+            background: rgba(39, 39, 45, 0.5);
+            border-radius: 16px;
+            padding: 14px;
+            border: 1px solid rgba(255,255,255,0.02);
+            margin-bottom: 8px;
+        }
+        .aluminum-title {
+            color: #e5e7eb;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+        .aluminum-logo {
+            color: #f3f4f6;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+        }
+        .media-preview { max-width: 100px; max-height: 100px; border-radius: 12px; margin: 4px; object-fit: cover; }
         .media-type-selector { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-        .media-type-btn { padding: 10px 18px; background: #1a1a24; border: 1px solid #2a2a35; border-radius: 30px; cursor: pointer; transition: all 0.3s; color: #a1a1aa; font-weight: 500; display: flex; align-items: center; gap: 6px; }
-        .media-type-btn.active { background: #2563eb; border-color: #2563eb; color: #fff; }
-        .media-preview-container { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+        .media-type-btn { padding: 8px 16px; background: #0f0f13; border: 1px solid #27272a; border-radius: 10px; cursor: pointer; transition: all 0.3s; color: #fff; font-size: 14px; }
+        .media-type-btn.active { background: #2563eb; border-color: #2563eb; }
+        .media-preview-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
         .media-item { position: relative; }
-        .media-remove { position: absolute; top: -6px; right: -6px; background: #ef4444; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; font-weight: bold; border: 2px solid #1a1a24; }
-        .btn { padding: 12px 24px; border-radius: 30px; font-weight: 600; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
-        .btn-primary { background: #2563eb; color: #fff; box-shadow: 0 8px 16px -4px rgba(37,99,235,0.3); }
-        .btn-primary:hover { background: #1e4fcf; transform: translateY(-2px); }
-        .btn-success { background: #10b981; color: #fff; box-shadow: 0 8px 16px -4px rgba(16,185,129,0.3); }
-        .btn-success:hover { background: #0ea271; transform: translateY(-2px); }
-        .btn-danger { background: #ef4444; color: #fff; box-shadow: 0 8px 16px -4px rgba(239,68,68,0.3); }
-        .btn-danger:hover { background: #dc2626; transform: translateY(-2px); }
-        .btn-warning { background: #f59e0b; color: #fff; box-shadow: 0 8px 16px -4px rgba(245,158,11,0.3); }
-        .btn-warning:hover { background: #d97706; transform: translateY(-2px); }
-        .btn-outline { background: transparent; border: 1px solid #2a2a35; color: #a1a1aa; }
-        .btn-outline:hover { border-color: #2563eb; color: #fff; }
+        .media-remove { position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 12px; font-weight: bold; }
+        .preserve-whitespace { white-space: pre-wrap; word-break: break-word; }
+
+        /* Modal de contactos */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal.active {
+            display: flex;
+        }
+        .modal-content {
+            background: #18181c;
+            border-radius: 32px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 20px;
+            border: 1px solid #2a2a2e;
+        }
+        .contact-item {
+            padding: 12px;
+            border-bottom: 1px solid #27272a;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .contact-item:hover {
+            background: #2a2a2e;
+        }
+        .contact-item.selected {
+            background: #2563eb20;
+            border-left: 3px solid #2563eb;
+        }
+        .contact-name {
+            font-weight: 500;
+            color: #e5e7eb;
+        }
+        .contact-number {
+            font-size: 12px;
+            color: #a1a1aa;
+        }
     </style>
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r border-white/5 -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-6 overflow-y-auto">
-        <div class="flex items-center gap-3 mb-10 px-2">
-            <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-800 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
-                <i data-lucide="bot" class="text-white w-6 h-6"></i>
+    <!-- MODAL DE CONTACTOS -->
+    <div id="contactModal" class="modal" onclick="if(event.target===this) closeContactModal()">
+        <div class="modal-content glass">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold aluminum-title">Seleccionar contacto</h3>
+                <button onclick="closeContactModal()" class="text-zinc-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
             </div>
-            <span class="text-2xl font-extrabold tracking-tighter bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">GZMBOT</span>
+            <input type="text" id="contactSearch" placeholder="Buscar contacto..." class="mb-4">
+            <div id="contactList" class="space-y-1 max-h-96 overflow-y-auto"></div>
+            <div class="mt-4 text-right">
+                <button onclick="closeContactModal()" class="px-4 py-2 bg-zinc-700 rounded-xl">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SIDEBAR -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r border-white/5 -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-5 overflow-y-auto">
+        <div class="flex items-center gap-3 mb-8 px-3">
+            <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-500 rounded-xl flex items-center justify-center shadow-xl flex-shrink-0">
+                <i data-lucide="bot" class="text-white w-5 h-5"></i>
+            </div>
+            <span class="text-xl font-extrabold tracking-tight aluminum-logo">GZMBOT</span>
         </div>
         <nav class="space-y-1 flex-1">
-            <div onclick="nav('dash')" id="n-dash" class="sidebar-item active"><i data-lucide="layout-grid" class="w-5 h-5"></i><span>Dashboard</span></div>
-            <div onclick="nav('conn')" id="n-conn" class="sidebar-item"><i data-lucide="qr-code" class="w-5 h-5"></i><span>Conexión</span></div>
-            <div onclick="nav('train')" id="n-train" class="sidebar-item"><i data-lucide="message-square" class="w-5 h-5"></i><span>Respuestas</span></div>
-            <div onclick="nav('learn')" id="n-learn" class="sidebar-item"><i data-lucide="brain" class="w-5 h-5"></i><span>Aprender</span></div>
-            <div onclick="nav('rem')" id="n-rem" class="sidebar-item"><i data-lucide="bell" class="w-5 h-5"></i><span>Recordatorios</span></div>
-            <div onclick="nav('excl')" id="n-excl" class="sidebar-item"><i data-lucide="shield-off" class="w-5 h-5"></i><span>Excluidos</span></div>
-            <div onclick="nav('config')" id="n-config" class="sidebar-item"><i data-lucide="settings" class="w-5 h-5"></i><span>Ajustes</span></div>
+            <div onclick="nav('dash'); if(window.innerWidth<1024) toggleSidebar()" id="n-dash" class="sidebar-item active"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></div>
+            <div onclick="nav('conn'); if(window.innerWidth<1024) toggleSidebar()" id="n-conn" class="sidebar-item"><i data-lucide="qr-code"></i><span>Conexión</span></div>
+            <div onclick="nav('train'); if(window.innerWidth<1024) toggleSidebar()" id="n-train" class="sidebar-item"><i data-lucide="message-square"></i><span>Respuestas</span></div>
+            <div onclick="nav('learn'); if(window.innerWidth<1024) toggleSidebar()" id="n-learn" class="sidebar-item"><i data-lucide="brain"></i><span>Aprender</span></div>
+            <div onclick="nav('rem'); if(window.innerWidth<1024) toggleSidebar()" id="n-rem" class="sidebar-item"><i data-lucide="bell"></i><span>Recordatorios</span></div>
+            <div onclick="nav('excl'); if(window.innerWidth<1024) toggleSidebar()" id="n-excl" class="sidebar-item"><i data-lucide="shield-off"></i><span>Excluidos</span></div>
+            <div onclick="nav('config'); if(window.innerWidth<1024) toggleSidebar()" id="n-config" class="sidebar-item"><i data-lucide="settings"></i><span>Ajustes</span></div>
         </nav>
-        <button onclick="location.href='/login'" class="sidebar-item text-red-400 hover:bg-red-500/10 hover:text-red-400 mt-auto">
-            <i data-lucide="power" class="w-5 h-5"></i><span>Salir del Panel</span>
+        <button onclick="location.href='/login'" class="sidebar-item text-red-400 hover:bg-red-500/10 mt-6">
+            <i data-lucide="log-out"></i><span>Salir</span>
         </button>
     </aside>
 
-    <main class="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#0a0a0f]">
-        <header class="lg:hidden p-4 glass flex justify-between items-center flex-shrink-0 mx-4 mt-4 rounded-2xl">
-            <span class="font-bold text-lg">GZMBOT</span>
-            <button onclick="toggleSidebar()" class="p-2 hover:bg-white/10 rounded-xl transition"><i data-lucide="menu"></i></button>
+    <!-- MAIN CONTENT -->
+    <main id="main-content" class="flex-1 flex flex-col min-w-0 overflow-hidden" onclick="if(window.innerWidth<1024 && !document.getElementById('sidebar').classList.contains('-translate-x-full')) toggleSidebar()">
+        <header class="lg:hidden p-4 glass border-b border-white/5 flex justify-between items-center flex-shrink-0">
+            <span class="font-bold text-lg aluminum-logo">GZMBOT</span>
+            <button onclick="toggleSidebar(); event.stopPropagation()" class="p-2 text-zinc-400 hover:text-white">
+                <i data-lucide="menu"></i>
+            </button>
         </header>
 
-        <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
-            <!-- DASHBOARD -->
+            <!-- ========== DASHBOARD ========== -->
             <div id="p-dash" class="page active">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-                    <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Dashboard</h1>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                    <h1 class="text-3xl font-bold aluminum-title">Panel de Control</h1>
                     <div class="flex items-center gap-4">
                         <div id="server-clock" class="text-sm text-zinc-500 font-mono bg-white/5 px-4 py-2 rounded-full"></div>
-                        <div class="px-4 py-2 glass rounded-full flex items-center gap-2">
+                        <div class="px-4 py-2 glass-card flex items-center gap-2">
                             <div id="dot" class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></div>
-                            <span id="bot-status" class="text-xs font-bold uppercase tracking-widest text-zinc-400">Desconectado</span>
+                            <span id="bot-status" class="text-xs font-semibold uppercase tracking-wider text-zinc-400">Desconectado</span>
                         </div>
                     </div>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="glass-card p-8">
-                        <div class="flex items-center gap-4 mb-4">
-                            <div class="w-12 h-12 bg-blue-500/20 rounded-2xl flex items-center justify-center">
-                                <i data-lucide="message-circle" class="w-6 h-6 text-blue-500"></i>
-                            </div>
-                            <p class="text-zinc-400 font-medium">Bot ha respondido</p>
+
+                <!-- Tarjetas de estadísticas principales -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
+                    <div class="glass-card p-6 flex items-center gap-4">
+                        <div class="w-14 h-14 rounded-2xl bg-blue-500/20 flex items-center justify-center">
+                            <i data-lucide="message-circle" class="w-7 h-7 text-blue-400"></i>
                         </div>
-                        <h2 id="s-replied" class="text-5xl md:text-6xl font-black text-blue-500">0</h2>
-                    </div>
-                    <div class="glass-card p-8">
-                        <div class="flex items-center gap-4 mb-4">
-                            <div class="w-12 h-12 bg-zinc-500/20 rounded-2xl flex items-center justify-center">
-                                <i data-lucide="users" class="w-6 h-6 text-zinc-400"></i>
-                            </div>
-                            <p class="text-zinc-400 font-medium">Tráfico Total</p>
+                        <div>
+                            <p class="text-zinc-500 text-sm font-medium">Respondidas</p>
+                            <h2 id="s-replied" class="stat-value">0</h2>
                         </div>
-                        <h2 id="s-total" class="text-5xl md:text-6xl font-black text-white">0</h2>
                     </div>
+                    <div class="glass-card p-6 flex items-center gap-4">
+                        <div class="w-14 h-14 rounded-2xl bg-purple-500/20 flex items-center justify-center">
+                            <i data-lucide="users" class="w-7 h-7 text-purple-400"></i>
+                        </div>
+                        <div>
+                            <p class="text-zinc-500 text-sm font-medium">Total mensajes</p>
+                            <h2 id="s-total" class="stat-value">0</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recordatorios de hoy -->
+                <div class="glass-card p-6 mb-8">
+                    <div class="flex items-center gap-3 mb-4">
+                        <i data-lucide="bell" class="w-5 h-5 text-emerald-400"></i>
+                        <h3 class="font-semibold text-lg aluminum-title">Recordatorios de hoy</h3>
+                        <span class="badge bg-emerald-500/10 text-emerald-400 ml-auto">HOY</span>
+                    </div>
+                    <div id="today-reminders-list" class="space-y-2">
+                        <div class="text-zinc-500 text-sm py-4 text-center">Cargando...</div>
+                    </div>
+                    <button onclick="nav('rem')" class="mt-3 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1">
+                        Ver todos <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <!-- Últimos mensajes sin respuesta -->
+                <div class="glass-card p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <i data-lucide="brain" class="w-5 h-5 text-amber-400"></i>
+                        <h3 class="font-semibold text-lg aluminum-title">Últimos mensajes sin respuesta</h3>
+                    </div>
+                    <div id="recent-learning-list" class="space-y-2 max-h-80 overflow-y-auto pr-2">
+                        <div class="text-zinc-500 text-sm py-4 text-center">No hay datos</div>
+                    </div>
+                    <button onclick="nav('learn')" class="mt-3 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1">
+                        Ir a aprender <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
                 </div>
             </div>
 
-            <!-- CONEXIÓN -->
+            <!-- ========== CONEXIÓN ========== -->
             <div id="p-conn" class="page">
-                <div class="max-w-lg mx-auto">
-                    <div class="glass-card p-8 text-center">
-                        <div id="qr-container" class="bg-white p-4 rounded-2xl inline-block mb-6">
-                            <div id="qr-img" class="w-64 h-64 flex items-center justify-center text-black font-bold text-sm">Esperando...</div>
+                <h2 class="text-2xl font-bold aluminum-title mb-6">Conexión WhatsApp</h2>
+                <div class="max-w-md mx-auto glass-card p-8 text-center">
+                    <div id="qr-container" class="bg-white p-4 rounded-3xl inline-block mb-6">
+                        <div id="qr-img" class="w-64 h-64 flex items-center justify-center text-black font-bold">
+                            <span class="text-sm text-gray-500">Esperando código QR...</span>
                         </div>
-                        <div id="connected-container" class="hidden mb-6">
-                            <div class="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>
-                            </div>
-                            <h2 class="text-2xl font-bold text-green-500 mb-2">WhatsApp Vinculado</h2>
-                            <p class="text-zinc-400">El bot está conectado y funcionando.</p>
-                        </div>
-                        <h2 class="text-2xl font-bold mb-2">Vincular WhatsApp</h2>
-                        <p class="text-zinc-500 text-sm mb-6">Escanea el código QR con tu WhatsApp</p>
-                        <button id="btn-logout-wa" onclick="logoutWA()" class="hidden btn btn-danger w-full">
-                            <i data-lucide="unlink" class="w-5 h-5"></i> Desvincular
-                        </button>
                     </div>
+                    <div id="connected-container" class="hidden mb-6">
+                        <div class="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>
+                        </div>
+                        <h2 class="text-2xl font-bold text-green-500 mb-2">WhatsApp Vinculado</h2>
+                        <p class="text-zinc-500">El bot está conectado y funcionando.</p>
+                    </div>
+                    <h2 class="text-xl font-bold aluminum-title mb-2">Escanear código QR</h2>
+                    <p class="text-zinc-500 text-sm mb-6">Usa WhatsApp para vincular el bot.</p>
+                    <button id="btn-logout-wa" onclick="logoutWA()" class="hidden w-full py-4 bg-red-500/10 text-red-500 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition">
+                        <i data-lucide="unlink" class="inline w-4 h-4 mr-2"></i>DESVINCULAR
+                    </button>
                 </div>
             </div>
 
-            <!-- RESPUESTAS -->
+            <!-- ========== RESPUESTAS ========== -->
             <div id="p-train" class="page">
-                <div class="flex flex-wrap gap-3 mb-6">
-                    <button onclick="downloadTemplate()" class="btn btn-outline"><i data-lucide="download" class="w-5 h-5"></i> Plantilla</button>
-                    <button onclick="document.getElementById('import-file').click()" class="btn btn-success"><i data-lucide="upload" class="w-5 h-5"></i> Importar</button>
-                    <button onclick="exportTraining()" class="btn btn-warning"><i data-lucide="file-text" class="w-5 h-5"></i> Exportar</button>
+                <h2 class="text-2xl font-bold aluminum-title mb-4">Gestión de Respuestas</h2>
+                <div class="mb-4 flex gap-2 flex-wrap">
+                    <button onclick="downloadTemplate()" class="px-4 py-2 bg-purple-600 rounded-xl font-bold flex items-center gap-2 hover:bg-purple-700 transition text-sm">
+                        <i data-lucide="download" class="w-4 h-4"></i>Plantilla
+                    </button>
+                    <button onclick="document.getElementById('import-file').click()" class="px-4 py-2 bg-green-600 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition text-sm">
+                        <i data-lucide="upload" class="w-4 h-4"></i>Importar
+                    </button>
+                    <button onclick="exportTraining()" class="px-4 py-2 bg-orange-600 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-700 transition text-sm">
+                        <i data-lucide="file-text" class="w-4 h-4"></i>Exportar
+                    </button>
                     <input type="file" id="import-file" accept=".txt" class="hidden" onchange="importTraining(this)">
                 </div>
-                <div class="grid lg:grid-cols-3 gap-6">
-                    <div class="lg:col-span-1 glass-card p-6 h-fit">
-                        <h3 class="font-bold text-lg mb-4 flex items-center gap-2"><i data-lucide="plus-circle" class="text-blue-500"></i> Nueva Regla</h3>
+                <div class="grid lg:grid-cols-3 gap-4 sm:gap-8">
+                    <div class="lg:col-span-1 glass p-4 sm:p-6 rounded-2xl h-fit">
+                        <h3 class="font-bold mb-4 flex items-center gap-2 aluminum-title"><i data-lucide="plus-circle" class="text-blue-500"></i> Nueva Regla</h3>
                         <form id="train-form" enctype="multipart/form-data" onsubmit="saveTrain(event)">
                             <input type="hidden" id="t-id">
                             <input type="text" id="t-key" placeholder="Cuando digan..." class="mb-3" required>
-                            <textarea id="t-res" placeholder="Responder..." class="h-32 mb-4" required></textarea>
+                            <textarea id="t-res" placeholder="Responder..." class="h-28 mb-4" required></textarea>
                             <div class="mb-4">
-                                <label class="block text-sm text-zinc-400 mb-2">Tipo de respuesta:</label>
+                                <label class="block text-sm text-zinc-400 mb-2">Tipo:</label>
                                 <div class="media-type-selector">
-                                    <button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="w-4 h-4"></i> Texto</button>
-                                    <button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="w-4 h-4"></i> Imagen</button>
-                                    <button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="w-4 h-4"></i> Video</button>
+                                    <button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="inline w-4 h-4"></i> Texto</button>
+                                    <button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="inline w-4 h-4"></i> Imagen</button>
+                                    <button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="inline w-4 h-4"></i> Video</button>
                                 </div>
                             </div>
                             <div id="media-upload" class="hidden mb-4">
@@ -1042,90 +1077,117 @@ cat <<'HTMLEOF' > views/index.html
                                 <input type="file" id="t-media" accept="image/*,video/*" multiple>
                                 <div id="media-preview" class="media-preview-container"></div>
                             </div>
-                            <button type="submit" class="btn btn-primary w-full">Guardar Regla</button>
+                            <button type="submit" class="w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Guardar</button>
                         </form>
                     </div>
-                    <div id="l-train" class="lg:col-span-2 space-y-4"></div>
+                    <div id="l-train" class="lg:col-span-2 space-y-3"></div>
                 </div>
             </div>
 
-            <!-- APRENDER -->
+            <!-- ========== APRENDER ========== -->
             <div id="p-learn" class="page">
-                <h2 class="text-2xl font-bold mb-2">Bandeja de Aprendizaje</h2>
-                <p class="text-zinc-500 text-sm mb-6">Mensajes que el bot no supo responder</p>
+                <h2 class="text-2xl font-bold aluminum-title mb-4">Bandeja de Aprendizaje</h2>
+                <p class="text-zinc-500 text-sm mb-4">Conversaciones que el bot no supo responder</p>
                 <div id="l-learn" class="space-y-3"></div>
             </div>
 
-            <!-- RECORDATORIOS -->
+            <!-- ========== RECORDATORIOS ========== -->
             <div id="p-rem" class="page">
-                <div class="glass-card p-6 mb-8">
+                <h2 class="text-2xl font-bold aluminum-title mb-4">Recordatorios</h2>
+                <div class="glass p-4 sm:p-8 rounded-2xl mb-6">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="font-bold text-xl">Programar Recordatorio</h3>
-                        <span id="rem-clock" class="text-sm text-zinc-500 font-mono"></span>
+                        <h3 class="font-bold text-base sm:text-lg aluminum-title">Programar Recordatorio</h3>
+                        <span id="rem-clock" class="text-xs text-zinc-500 font-mono"></span>
                     </div>
-                    <p class="text-xs text-zinc-500 mb-4">⏰ Los recordatorios usan hora de República Dominicana (AST/UTC-4)</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <p class="text-xs text-zinc-500 mb-4">⏰ Hora República Dominicana (UTC-4)</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                         <input type="hidden" id="r-id">
-                        <input type="text" id="r-name" placeholder="Nombre del cliente">
-                        <input type="text" id="r-phone" placeholder="Número (ej: 18091234567)">
-                        <input type="text" id="r-msg" placeholder="Mensaje a enviar" class="md:col-span-2">
-                        <select id="r-freq">
-                            <option>Una vez</option>
-                            <option>Diario</option>
-                            <option>Semanal</option>
-                            <option>Mensual</option>
-                            <option>Anual</option>
-                        </select>
+                        <div class="relative">
+                            <input type="text" id="r-name" placeholder="Nombre">
+                        </div>
+                        <div class="relative flex items-center gap-2">
+                            <input type="text" id="r-phone" placeholder="Número (ej: 18091234567)" class="flex-1">
+                            <button type="button" onclick="openContactModal('r-phone', 'r-name')" class="p-3 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition">
+                                <i data-lucide="users" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                        <textarea id="r-msg" placeholder="Mensaje" rows="3" class="sm:col-span-2 lg:col-span-2 resize-none"></textarea>
+                        <select id="r-freq"><option>Una vez</option><option>Diario</option><option>Semanal</option><option>Mensual</option><option>Anual</option></select>
                         <input type="datetime-local" id="r-date">
                     </div>
-                    <button onclick="saveRem()" class="btn btn-success mt-6">Programar Recordatorio</button>
+                    <button onclick="saveRem()" class="mt-4 w-full sm:w-auto px-8 py-3 bg-emerald-600 rounded-2xl font-bold hover:bg-emerald-700 transition">Programar</button>
                 </div>
                 <div id="l-rem" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
             </div>
 
-            <!-- EXCLUIDOS -->
+            <!-- ========== EXCLUIDOS ========== -->
             <div id="p-excl" class="page">
-                <div class="max-w-2xl mx-auto">
-                    <div class="glass-card p-6">
-                        <h2 class="text-xl font-bold mb-4 flex items-center gap-2"><i data-lucide="shield-off" class="text-red-500"></i> Números Bloqueados</h2>
-                        <div class="flex flex-col sm:flex-row gap-2 mb-6">
-                            <input type="text" id="e-name" placeholder="Nombre" class="flex-1">
+                <h2 class="text-2xl font-bold aluminum-title mb-4">Números Excluidos</h2>
+                <div class="w-full max-w-xl mx-auto glass p-4 sm:p-8 rounded-2xl">
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input type="text" id="e-name" placeholder="Nombre" class="flex-1">
+                        <div class="flex items-center gap-2 flex-1">
                             <input type="text" id="e-phone" placeholder="Número" class="flex-1">
-                            <button onclick="saveExcl()" class="btn btn-primary whitespace-nowrap">Añadir a Bloqueados</button>
+                            <button type="button" onclick="openContactModal('e-phone', 'e-name')" class="p-3 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition">
+                                <i data-lucide="users" class="w-5 h-5"></i>
+                            </button>
                         </div>
-                        <div id="l-excl" class="space-y-2"></div>
+                        <button onclick="saveExcl()" class="bg-white text-black px-6 py-3 font-bold rounded-xl hover:bg-zinc-200 transition whitespace-nowrap">Añadir</button>
                     </div>
+                    <div id="l-excl" class="mt-6 space-y-2"></div>
                 </div>
             </div>
 
-            <!-- AJUSTES -->
+            <!-- ========== AJUSTES ========== -->
             <div id="p-config" class="page">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl mx-auto">
-                    <div class="glass-card p-8">
-                        <h2 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="key" class="text-blue-500"></i> Credenciales</h2>
-                        <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-4">
+                <h2 class="text-2xl font-bold aluminum-title mb-4">Configuración</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 max-w-4xl mx-auto">
+                    <div class="glass p-5 sm:p-10 rounded-2xl">
+                        <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-6">Credenciales de Acceso</h2>
+                        <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-3">
                         <input type="password" id="conf-pass" placeholder="Nueva Contraseña" class="mb-6">
-                        <button onclick="saveCredentials()" class="btn btn-primary w-full">Actualizar Seguridad</button>
+                        <button onclick="saveCredentials()" class="w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Actualizar</button>
                     </div>
-                    <div class="glass-card p-8">
-                        <h2 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="shield" class="text-emerald-500"></i> Copias de Seguridad</h2>
-                        <div class="mb-6">
-                            <p class="text-sm text-zinc-400 mb-2">Número para recibir backups por WhatsApp:</p>
+                    <div class="glass p-5 sm:p-10 rounded-2xl">
+                        <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-4">Copias de Seguridad</h2>
+                        <div class="mb-5">
+                            <p class="text-xs sm:text-sm text-zinc-400 mb-2">Número para backups:</p>
                             <div class="flex gap-2">
-                                <input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="flex-1">
-                                <button onclick="saveBackupPhone()" class="btn btn-success flex items-center gap-1">
-                                    <i data-lucide="save" class="w-5 h-5"></i> Guardar
+                                <div class="flex items-center gap-2 flex-1">
+                                    <input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="flex-1">
+                                    <button type="button" onclick="openContactModal('conf-backup-phone', null)" class="p-3 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition">
+                                        <i data-lucide="users" class="w-5 h-5"></i>
+                                    </button>
+                                </div>
+                                <button onclick="saveBackupPhone()" class="px-4 py-3 bg-emerald-600 rounded-xl font-bold hover:bg-emerald-700 transition flex items-center gap-1 text-sm whitespace-nowrap">
+                                    <i data-lucide="save" class="w-4 h-4"></i> Guardar
                                 </button>
                             </div>
                             <p id="phone-saved-msg" class="text-xs mt-2 hidden"></p>
                         </div>
-                        <div class="space-y-3">
-                            <button onclick="downloadBackup()" class="btn btn-outline w-full"><i data-lucide="download" class="w-5 h-5"></i> Descargar Backup</button>
-                            <button onclick="sendBackupManually()" class="btn btn-primary w-full"><i data-lucide="send" class="w-5 h-5"></i> Enviar a WhatsApp</button>
-                            <button onclick="document.getElementById('restore-file').click()" class="btn btn-warning w-full"><i data-lucide="upload" class="w-5 h-5"></i> Restaurar Backup</button>
+                        <div class="space-y-2">
+                            <button onclick="downloadBackup()" class="w-full py-3 bg-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition text-sm">
+                                <i data-lucide="download" class="w-4 h-4"></i>Descargar Backup
+                            </button>
+                            <button onclick="sendBackupManually()" class="w-full py-3 bg-blue-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition text-sm">
+                                <i data-lucide="send" class="w-4 h-4"></i>Enviar a WhatsApp
+                            </button>
+                            <button onclick="document.getElementById('restore-file').click()" class="w-full py-3 bg-orange-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-orange-700 transition text-sm">
+                                <i data-lucide="upload" class="w-4 h-4"></i>Restaurar Backup
+                            </button>
                             <input type="file" id="restore-file" accept=".json" class="hidden" onchange="restoreBackup(this)">
                         </div>
-                        <p class="text-xs text-zinc-500 mt-4">💡 Backup automático diario a las 12:00 AM hora RD.</p>
+                        <p class="text-xs text-zinc-500 mt-4">💡 Backup diario 12:00 AM hora RD.</p>
+                    </div>
+                    <!-- NUEVA TARJETA: RETARDO -->
+                    <div class="glass p-5 sm:p-10 rounded-2xl">
+                        <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-4">Configuración de Respuesta</h2>
+                        <p class="text-sm text-zinc-400 mb-4">Tiempo de espera antes de responder (segundos)</p>
+                        <div class="flex items-center gap-4">
+                            <input type="range" id="response-delay" min="0" max="10" step="0.5" value="0" class="flex-1">
+                            <span id="delay-value" class="text-lg font-mono text-blue-400">0.0 s</span>
+                        </div>
+                        <button onclick="saveResponseDelay()" class="mt-4 w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Guardar Retardo</button>
                     </div>
                 </div>
             </div>
@@ -1134,28 +1196,28 @@ cat <<'HTMLEOF' > views/index.html
 
     <script>
         const socket = io();
-        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0 }, backupPhone:'' };
+        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0 }, backupPhone:'', responseDelay:0 };
         let currentMediaType = 'text';
         let selectedFiles = [];
+        let contacts = [];
+        let activePhoneField = null;
+        let activeNameField = null;
 
         function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); }
 
-        function nav(id, noToggle = false) {
+        function nav(id) {
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
             document.getElementById('p-'+id).classList.add('active');
             document.getElementById('n-'+id).classList.add('active');
-            if (!noToggle && window.innerWidth < 1024) toggleSidebar();
             lucide.createIcons();
         }
 
+        // Reloj en formato 12h con AM/PM
         function updateClock() {
             const now = new Date();
-            const rdTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santo_Domingo' }));
-            const h = String(rdTime.getHours()).padStart(2,'0');
-            const m = String(rdTime.getMinutes()).padStart(2,'0');
-            const s = String(rdTime.getSeconds()).padStart(2,'0');
-            const timeStr = h + ':' + m + ':' + s + ' RD';
+            const options = { timeZone: 'America/Santo_Domingo', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' };
+            const timeStr = now.toLocaleString('en-US', options) + ' RD';
             const el1 = document.getElementById('server-clock');
             const el2 = document.getElementById('rem-clock');
             if (el1) el1.textContent = '🕐 ' + timeStr;
@@ -1163,6 +1225,60 @@ cat <<'HTMLEOF' > views/index.html
         }
         setInterval(updateClock, 1000);
         updateClock();
+
+        // Funciones para el modal de contactos
+        function openContactModal(phoneFieldId, nameFieldId) {
+            activePhoneField = phoneFieldId;
+            activeNameField = nameFieldId;
+            document.getElementById('contactModal').classList.add('active');
+            renderContactList();
+        }
+
+        function closeContactModal() {
+            document.getElementById('contactModal').classList.remove('active');
+            activePhoneField = null;
+            activeNameField = null;
+        }
+
+        function renderContactList() {
+            const search = document.getElementById('contactSearch').value.toLowerCase();
+            const filtered = contacts.filter(c => 
+                (c.name && c.name.toLowerCase().includes(search)) || 
+                (c.number && c.number.includes(search))
+            );
+            const list = document.getElementById('contactList');
+            if (filtered.length === 0) {
+                list.innerHTML = '<div class="text-zinc-500 text-center py-4">No se encontraron contactos</div>';
+                return;
+            }
+            list.innerHTML = filtered.map(c => `
+                <div class="contact-item" onclick="selectContact('${c.number}', '${c.name.replace(/'/g, "\\'")}')">
+                    <i data-lucide="user" class="w-5 h-5 text-blue-400"></i>
+                    <div>
+                        <div class="contact-name">${c.name || 'Sin nombre'}</div>
+                        <div class="contact-number">${c.number}</div>
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        document.getElementById('contactSearch')?.addEventListener('input', renderContactList);
+
+        function selectContact(number, name) {
+            if (activePhoneField) {
+                document.getElementById(activePhoneField).value = number;
+            }
+            if (activeNameField && document.getElementById(activeNameField)) {
+                document.getElementById(activeNameField).value = name;
+            }
+            closeContactModal();
+        }
+
+        socket.on('contacts_update', data => {
+            contacts = data;
+            console.log('Contactos actualizados:', contacts.length);
+        });
 
         function setMediaType(type) {
             currentMediaType = type;
@@ -1178,7 +1294,7 @@ cat <<'HTMLEOF' > views/index.html
             lucide.createIcons();
         }
 
-        document.getElementById('t-media').addEventListener('change', function(e) {
+        document.getElementById('t-media')?.addEventListener('change', function(e) {
             const files = Array.from(e.target.files);
             if (files.length > 10) { alert('Máximo 10'); return; }
             selectedFiles = files;
@@ -1208,6 +1324,20 @@ cat <<'HTMLEOF' > views/index.html
             document.getElementById('t-media').dispatchEvent(new Event('change'));
         }
 
+        function showQR(url) {
+            const qrImg = document.getElementById('qr-img');
+            if (qrImg) {
+                qrImg.innerHTML = '<img src="'+url+'" class="w-full">';
+            }
+        }
+
+        function clearQR() {
+            const qrImg = document.getElementById('qr-img');
+            if (qrImg) {
+                qrImg.innerHTML = '<span class="text-sm text-gray-500">Esperando código QR...</span>';
+            }
+        }
+
         socket.on('status_update', s => {
             document.getElementById('bot-status').innerText = s;
             document.getElementById('dot').className = s === 'Conectado'
@@ -1220,6 +1350,7 @@ cat <<'HTMLEOF' > views/index.html
                 document.getElementById('qr-container').classList.add('hidden');
                 document.getElementById('connected-container').classList.remove('hidden');
                 document.getElementById('btn-logout-wa').classList.remove('hidden');
+                clearQR();
             } else {
                 document.getElementById('qr-container').classList.remove('hidden');
                 document.getElementById('connected-container').classList.add('hidden');
@@ -1229,10 +1360,21 @@ cat <<'HTMLEOF' > views/index.html
         });
 
         socket.on('qr_update', url => {
-            document.getElementById('qr-img').innerHTML = '<img src="'+url+'" class="w-full">';
+            showQR(url);
+        });
+
+        socket.on('qr_clear', () => {
+            clearQR();
         });
 
         socket.on('data_update', data => { db = data; render(); });
+
+        socket.on('config_update', (cfg) => {
+            if (cfg.responseDelay !== undefined) {
+                document.getElementById('response-delay').value = cfg.responseDelay;
+                document.getElementById('delay-value').textContent = cfg.responseDelay.toFixed(1) + ' s';
+            }
+        });
 
         async function load() {
             try {
@@ -1247,14 +1389,21 @@ cat <<'HTMLEOF' > views/index.html
                     document.getElementById('btn-logout-wa').classList.remove('hidden');
                     document.getElementById('bot-status').innerText = 'Conectado';
                     document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-green-500';
+                    clearQR();
                 } else {
                     document.getElementById('bot-status').innerText = data.botStatus || 'Desconectado';
                     document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse';
                 }
 
                 document.getElementById('conf-backup-phone').value = data.backupPhone || '';
+                document.getElementById('response-delay').value = data.responseDelay || 0;
+                document.getElementById('delay-value').textContent = (data.responseDelay || 0).toFixed(1) + ' s';
                 render();
                 lucide.createIcons();
+
+                // Cargar contactos
+                const contactsRes = await fetch('/api/contacts');
+                contacts = await contactsRes.json();
             } catch(e) { console.error(e); }
         }
 
@@ -1272,10 +1421,10 @@ cat <<'HTMLEOF' > views/index.html
                 const day = String(d.getDate()).padStart(2,'0');
                 const month = String(d.getMonth()+1).padStart(2,'0');
                 const year = d.getFullYear();
-                const h = String(d.getHours()).padStart(2,'0');
+                const h = d.getHours();
                 const m = String(d.getMinutes()).padStart(2,'0');
-                const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-                const h12 = d.getHours() % 12 || 12;
+                const ampm = h >= 12 ? 'PM' : 'AM';
+                const h12 = h % 12 || 12;
                 return day+'/'+month+'/'+year+' '+h12+':'+m+' '+ampm;
             } catch(e) { return dateStr; }
         }
@@ -1284,72 +1433,76 @@ cat <<'HTMLEOF' > views/index.html
             document.getElementById('s-replied').innerText = db.stats ? db.stats.replied : 0;
             document.getElementById('s-total').innerText = db.stats ? db.stats.total : 0;
 
-            document.getElementById('l-train').innerHTML = (db.training || []).map((t,i) =>
-                `<div class="glass-card p-5">
-                    <div class="flex justify-between items-start gap-3">
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2 mb-1 flex-wrap">
-                                <span class="text-blue-400 font-semibold">P:</span>
-                                <span class="font-medium break-all">${esc(t.key)}</span>
-                                ${t.mediaPaths && t.mediaPaths.length > 0 ? `<span class="text-xs bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full">${t.mediaPaths.length} archivo(s)</span>` : ''}
-                            </div>
-                            <p class="text-sm text-zinc-300 break-all">${esc(t.response)}</p>
+            const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Santo_Domingo' }));
+            const todayStr = today.getFullYear() + '-' + 
+                             String(today.getMonth() + 1).padStart(2, '0') + '-' + 
+                             String(today.getDate()).padStart(2, '0');
+
+            const todayReminders = (db.reminders || [])
+                .map((r, index) => ({ ...r, index }))
+                .filter(r => r.date.startsWith(todayStr))
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .slice(0, 5);
+
+            const todayRemEl = document.getElementById('today-reminders-list');
+            if (todayReminders.length === 0) {
+                todayRemEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">No hay recordatorios para hoy</div>';
+            } else {
+                todayRemEl.innerHTML = todayReminders.map(r => `
+                    <div class="reminder-item flex justify-between items-center">
+                        <div>
+                            <div class="font-medium">${esc(r.name)}</div>
+                            <div class="text-xs text-zinc-500">📱 ${esc(r.phone)}</div>
                         </div>
-                        <div class="flex gap-1">
-                            <button onclick="editT(${i})" class="p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-xl transition"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
-                            <button onclick="delT(${i})" class="p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        <div class="text-right">
+                            <div class="text-sm text-emerald-400">${formatReminderDate(r.date)}</div>
+                            <span class="badge bg-blue-500/10 text-blue-400">${r.freq}</span>
                         </div>
                     </div>
-                    ${t.mediaPaths && t.mediaPaths.length > 0 ? `
-                    <div class="media-preview-container mt-3">
-                        ${t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? 
-                            `<img src="/${p}" class="media-preview">` : 
-                            `<video src="/${p}" class="media-preview" controls></video>`).join('')}
-                    </div>` : ''}
-                </div>`
+                `).join('');
+            }
+
+            const recentLearn = (db.learning || []).slice(-5).reverse();
+            const learnEl = document.getElementById('recent-learning-list');
+            if (recentLearn.length === 0) {
+                learnEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">No hay mensajes nuevos</div>';
+            } else {
+                learnEl.innerHTML = recentLearn.map(l => `
+                    <div class="learning-item">
+                        <div class="flex justify-between items-start">
+                            <span class="text-xs text-zinc-500">${l.date} · ${l.from}</span>
+                            <button onclick="useLFromDashboard('${esc(l.text)}')" class="text-blue-400 hover:text-blue-300 text-xs font-medium">Usar</button>
+                        </div>
+                        <p class="text-sm mt-1 break-all">${esc(l.text)}</p>
+                    </div>
+                `).join('');
+            }
+
+            document.getElementById('l-train').innerHTML = (db.training || []).map((t,i) =>
+                '<div class="glass p-4 rounded-2xl"><div class="flex justify-between items-start mb-2 gap-2"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1 flex-wrap"><b class="text-blue-500 text-sm">P:</b><span class="text-sm break-all">'+esc(t.key)+'</span>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded">'+t.mediaPaths.length+' ARCHIVO(S)</span>' : '')+'</div><span class="text-xs sm:text-sm text-zinc-400 break-all">'+esc(t.response)+'</span></div><div class="flex gap-1 flex-shrink-0"><button onclick="editT('+i+')" class="p-2 text-zinc-500 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delT('+i+')" class="p-2 text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<div class="media-preview-container">'+t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? '<img src="/'+p+'" class="media-preview">' : '<video src="/'+p+'" class="media-preview" controls></video>').join('')+'</div>' : '')+'</div>'
             ).join('');
 
             document.getElementById('l-learn').innerHTML = (!db.learning || db.learning.length === 0)
-                ? '<div class="glass-card p-8 text-center text-zinc-500">No hay conversaciones nuevas</div>'
+                ? '<div class="glass p-6 rounded-2xl text-center text-zinc-500">No hay conversaciones nuevas</div>'
                 : db.learning.map((l,i) =>
-                    `<div class="glass-card p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                        <div class="min-w-0 flex-1">
-                            <span class="text-xs text-zinc-500">${l.date} - ${l.from}</span>
-                            <p class="font-medium break-all">${esc(l.text)}</p>
-                        </div>
-                        <div class="flex gap-2">
-                            <button onclick="useL(${i})" class="btn btn-primary text-sm py-2 px-4">Usar</button>
-                            <button onclick="delL(${i})" class="p-2 text-red-400 hover:bg-red-500/10 rounded-xl"><i data-lucide="x" class="w-5 h-5"></i></button>
-                        </div>
-                    </div>`
+                    '<div class="glass p-3 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"><div class="min-w-0 flex-1"><small class="text-zinc-500 text-xs">'+l.date+' - '+l.from+'</small><br><b class="text-sm break-all">'+esc(l.text)+'</b>'+(l.hasMedia ? ' <span class="ml-1 text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded">MEDIA</span>' : '')+'</div><div class="flex gap-2 flex-shrink-0"><button onclick="useL('+i+')" class="bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold">Configurar</button><button onclick="delL('+i+')" class="text-red-500 p-2"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>'
                 ).join('');
 
             document.getElementById('l-rem').innerHTML = (db.reminders || []).map((r,i) =>
-                `<div class="glass-card p-5 border-l-4 border-emerald-500">
-                    <div class="flex justify-between items-start">
-                        <h3 class="font-bold text-lg">${esc(r.name)}</h3>
-                        <div class="flex gap-1">
-                            <button onclick="editR(${i})" class="p-2 text-zinc-400 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
-                            <button onclick="delR(${i})" class="p-2 text-red-400"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-                        </div>
-                    </div>
-                    <p class="text-sm text-zinc-400 mb-2">📱 ${esc(r.phone)}</p>
-                    <p class="text-sm text-zinc-300 mb-3">${esc(r.message)}</p>
-                    <div class="flex flex-wrap gap-2">
-                        <span class="text-xs font-bold bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full">${r.freq}</span>
-                        <span class="text-xs font-bold bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full">📅 ${formatReminderDate(r.date)}</span>
-                    </div>
-                </div>`
+                '<div class="glass p-4 rounded-2xl border-l-4 border-emerald-500"><div class="flex justify-between items-start mb-2"><b class="text-base">'+esc(r.name)+'</b><div class="flex gap-1"><button onclick="editR('+i+')" class="text-zinc-400 hover:text-white p-1"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delR('+i+')" class="text-red-500 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div><p class="text-xs text-zinc-400 mb-2">📱 '+esc(r.phone)+'</p><p class="text-xs text-zinc-400 mb-2 preserve-whitespace">'+esc(r.message)+'</p><div class="flex flex-wrap gap-2"><span class="text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded">'+r.freq+'</span><span class="text-[10px] font-bold uppercase bg-blue-500/10 text-blue-400 px-2 py-1 rounded">📅 '+formatReminderDate(r.date)+'</span></div></div>'
             ).join('');
 
             document.getElementById('l-excl').innerHTML = (db.excluded || []).map((e,i) =>
-                `<div class="glass-card p-3 flex justify-between items-center">
-                    <span class="text-sm">${esc(e.name)} (${esc(e.phone)})</span>
-                    <button onclick="delE(${i})" class="text-red-400 hover:text-red-500 p-1"><i data-lucide="user-minus" class="w-5 h-5"></i></button>
-                </div>`
+                '<div class="glass p-3 rounded-xl flex justify-between items-center gap-2"><span class="text-sm break-all">'+esc(e.name)+' ('+esc(e.phone)+')</span><button onclick="delE('+i+')" class="text-red-500 flex-shrink-0 p-1"><i data-lucide="user-minus" class="w-4 h-4"></i></button></div>'
             ).join('');
 
             lucide.createIcons();
+        }
+
+        function useLFromDashboard(text) {
+            document.getElementById('t-key').value = text;
+            nav('train');
+            setTimeout(() => document.getElementById('t-res').focus(), 300);
         }
 
         async function saveTrain(e) {
@@ -1373,7 +1526,7 @@ cat <<'HTMLEOF' > views/index.html
         }
 
         async function delT(i) { if (confirm('¿Eliminar?')) { await fetch('/api/train/'+i, {method:'DELETE'}); load(); } }
-        function useL(i) { document.getElementById('t-key').value = db.learning[i].text; nav('train', true); setTimeout(() => document.getElementById('t-res').focus(), 300); }
+        function useL(i) { document.getElementById('t-key').value = db.learning[i].text; nav('train'); setTimeout(() => document.getElementById('t-res').focus(), 300); }
         async function delL(i) { await fetch('/api/learning/'+i, {method:'DELETE'}); load(); }
 
         async function saveRem() {
@@ -1429,6 +1582,19 @@ cat <<'HTMLEOF' > views/index.html
             setTimeout(() => msg.classList.add('hidden'), 3000);
         }
 
+        async function saveResponseDelay() {
+            const delay = parseFloat(document.getElementById('response-delay').value);
+            await fetch('/api/config/delay', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ delay })
+            });
+        }
+
+        document.getElementById('response-delay')?.addEventListener('input', function(e) {
+            document.getElementById('delay-value').textContent = parseFloat(e.target.value).toFixed(1) + ' s';
+        });
+
         function downloadBackup() { window.location.href='/api/backup/download'; }
         function downloadTemplate() { window.location.href='/api/train/template'; }
         function exportTraining() { window.location.href='/api/train/export'; }
@@ -1477,30 +1643,37 @@ cat <<'HTMLEOF' > views/index.html
 </html>
 HTMLEOF
 
-# ==================== LOGIN (SIN CAMBIOS) =====================
+# ===================== LOGIN =====================
 cat <<'LOGINEOF' > views/login.html
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>GZMBOT | Login</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;800&display=swap" rel="stylesheet">
     <style>
-        body { background: #0a0a0f; font-family: 'Plus Jakarta Sans', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 16px; }
-        .glass-card { background: rgba(20, 20, 30, 0.8); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.05); border-radius: 40px; padding: 40px; width: 100%; max-width: 420px; box-shadow: 0 30px 60px -20px rgba(0,0,0,0.8); }
-        .gradient-text { background: linear-gradient(135deg, #fff 0%, #94a3b8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        * { box-sizing: border-box; }
+        body { background: #0a0a0f; font-family: 'Inter', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 16px; background-image: radial-gradient(circle at 50% 50%, rgba(37,99,235,0.1) 0%, transparent 60%); }
+        .glow { position: absolute; width: 600px; height: 600px; background: radial-gradient(circle, rgba(37,99,235,0.15) 0%, transparent 70%); z-index: -1; }
+        .card { background: rgba(18,18,24,0.9); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.03); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        .aluminum-title {
+            color: #e5e7eb;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+        }
     </style>
 </head>
 <body>
-    <div class="glass-card text-center">
-        <h1 class="text-4xl font-black mb-2 gradient-text">GZMBOT</h1>
-        <p class="text-blue-500 font-semibold text-xs uppercase tracking-[0.3em] mb-8">Administrative Panel</p>
-        <form onsubmit="login(event)" class="space-y-5">
-            <input type="text" id="u" placeholder="Usuario maestro" class="w-full p-4 bg-[#1a1a24] border border-[#2a2a35] rounded-2xl text-white outline-none focus:border-blue-600 transition" required>
-            <input type="password" id="p" placeholder="Contraseña" class="w-full p-4 bg-[#1a1a24] border border-[#2a2a35] rounded-2xl text-white outline-none focus:border-blue-600 transition" required>
-            <button type="submit" class="w-full py-4 bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl text-white font-bold hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-blue-600/20">ACCEDER AL PANEL</button>
+    <div class="glow"></div>
+    <div class="card p-8 sm:p-12 rounded-[2.5rem] sm:rounded-[3.5rem] w-full max-w-md shadow-2xl text-center">
+        <h1 class="text-3xl sm:text-4xl font-black mb-2 tracking-tight aluminum-title">GZMBOT</h1>
+        <p class="text-blue-500 font-bold text-[10px] uppercase tracking-[0.3em] mb-8 sm:mb-10">Administrative Panel</p>
+        <form onsubmit="login(event)" class="space-y-4">
+            <input type="text" id="u" placeholder="Usuario maestro" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
+            <input type="password" id="p" placeholder="Contraseña" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
+            <button type="submit" class="w-full py-4 sm:py-5 bg-blue-600 rounded-2xl text-white font-black hover:scale-[1.02] active:scale-95 transition-all">ACCEDER AHORA</button>
         </form>
     </div>
     <script>
@@ -1515,90 +1688,73 @@ cat <<'LOGINEOF' > views/login.html
 </html>
 LOGINEOF
 
-# ==================== INSTALAR DEPENDENCIAS NPM ====================
-echo "[7/7] Instalando paquetes NPM (esto puede tomar varios minutos)..."
-cd /opt/gzmbot
+# ----------------------------------------------------------------------
+# 9. INSTALAR DEPENDENCIAS DE NODE Y CONFIGURAR PM2
+# ----------------------------------------------------------------------
+echo "📦 Instalando dependencias de Node.js (esto puede tomar unos minutos)..."
+cd $HOME/gzmbot
+npm install whatsapp-web.js qrcode express socket.io express-session puppeteer moment-timezone node-cron multer
 
-# Limpiar caché de npm para evitar problemas
-npm cache clean --force
-
-# Instalar dependencias
-npm install whatsapp-web.js@latest qrcode@latest express@latest socket.io@latest express-session@latest puppeteer@latest moment-timezone@latest node-cron@latest multer@latest
-
-# Instalar PM2 globalmente
-npm install -g pm2
-
-# ==================== CONFIGURAR PERMISOS ====================
-echo "🔧 Configurando permisos..."
-chown -R $SUDO_USER:$SUDO_USER /opt/gzmbot 2>/dev/null || chown -R root:root /opt/gzmbot
-chmod -R 755 /opt/gzmbot
-
-# ==================== INICIAR CON PM2 ====================
-echo "🔄 Configurando PM2..."
+# Instalar PM2 globalmente y configurar
+sudo npm install -g pm2
 pm2 delete gzmbot 2>/dev/null
-
-# Crear archivo de ecosystem para PM2
-cat <<EOF > ecosystem.config.js
-module.exports = {
-  apps: [{
-    name: 'gzmbot',
-    script: 'app.js',
-    cwd: '/opt/gzmbot',
-    env: {
-      TZ: 'America/Santo_Domingo',
-      PUPPETEER_EXECUTABLE_PATH: '/usr/bin/chromium-browser',
-      NODE_ENV: 'production'
-    },
-    watch: false,
-    max_memory_restart: '500M',
-    error_file: '/opt/gzmbot/error.log',
-    out_file: '/opt/gzmbot/out.log',
-    log_file: '/opt/gzmbot/combined.log',
-    time: true
-  }]
-}
-EOF
-
-pm2 start ecosystem.config.js
+pm2 start app.js --name gzmbot --env TZ=America/Santo_Domingo
 pm2 save
 pm2 startup
 
-# ==================== CONFIGURAR FIREWALL ====================
-echo "🛡️ Configurando firewall..."
-ufw allow 80/tcp 2>/dev/null || echo "⚠️  UFW no instalado, omite configuración de firewall"
+# ----------------------------------------------------------------------
+# 10. INSTALAR NGINX Y CONFIGURAR PROXY CON SSL
+# ----------------------------------------------------------------------
+echo "🔧 Instalando Nginx y configurando SSL con Let's Encrypt..."
+sudo apt-get install -y nginx certbot python3-certbot-nginx
 
-# ==================== MOSTRAR INFORMACIÓN FINAL ====================
-IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+# Crear configuración de Nginx para el dominio
+sudo tee /etc/nginx/sites-available/gzmbot > /dev/null <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
 
-echo ""
+# Habilitar el sitio
+sudo ln -sf /etc/nginx/sites-available/gzmbot /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# Obtener certificado SSL
+sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN --redirect
+
+# ----------------------------------------------------------------------
+# 11. MOSTRAR INFORMACIÓN FINAL
+# ----------------------------------------------------------------------
 echo "===================================================="
-echo "  ✨ GZMBOT ENTERPRISE - INSTALACIÓN COMPLETA"
+echo "✨ GZMBOT ENTERPRISE - INSTALACIÓN COMPLETADA"
 echo "===================================================="
-echo ""
-echo "🌐 PANEL WEB: http://$IP"
+echo "🌐 PANEL: https://$DOMAIN"
 echo "👤 USUARIO: $ADMIN_USER"
-echo "🔐 CONTRASEÑA: $ADMIN_PASS"
-echo "🕐 ZONA HORARIA: America/Santo_Domingo (UTC-4)"
-echo "📁 RUTA DE INSTALACIÓN: /opt/gzmbot"
+echo "🔐 PASS: $ADMIN_PASS"
+echo "🕐 TIMEZONE: America/Santo_Domingo (UTC-4)"
+echo "===================================================="
+echo "🎨 MEJORAS IMPLEMENTADAS:"
+echo "   ✅ Reloj en formato 12h (AM/PM) moderno"
+echo "   ✅ Retardo configurable (0-10s) antes de responder"
+echo "   ✅ Seguridad reforzada (cookies seguras, trust proxy)"
+echo "   ✅ Sincronización de contactos de WhatsApp"
+echo "   ✅ Selector de contactos en recordatorios, excluidos y backup"
+echo "   ✅ Actualización en vivo vía sockets"
+echo "   ✅ Cierre de menú al hacer clic fuera en móvil"
+echo "   ✅ Eliminación automática de mensajes usados de 'Aprender'"
 echo ""
-echo "✅ MEJORAS APLICADAS:"
-echo "   - Diagnóstico automático del sistema"
-echo "   - Instalación completa de Chromium"
-echo "   - Configuración headless ultra-robusta"
-echo "   - Reconexión automática ante fallos"
-echo "   - Limpieza automática de sesión corrupta"
-echo "   - Manejo avanzado de errores"
-echo "   - Logs detallados en /opt/gzmbot/*.log"
-echo ""
-echo "📌 COMANDOS ÚTILES:"
-echo "   Ver estado: pm2 status"
-echo "   Ver logs: pm2 logs gzmbot"
-echo "   Reiniciar: pm2 restart gzmbot"
-echo "   Detener: pm2 stop gzmbot"
-echo ""
-echo "⚠️  NOTA: Si el QR no aparece en 30 segundos:"
-echo "   1. Verifica los logs: pm2 logs gzmbot"
-echo "   2. Reinicia el bot: pm2 restart gzmbot"
-echo "   3. Limpia la sesión: rm -rf /opt/gzmbot/.wwebjs_auth/*"
-echo ""
+echo "👉 Visita https://$DOMAIN para acceder al panel."
+echo "   (Espera 30 segundos a que la app termine de iniciar)"
 echo "===================================================="
