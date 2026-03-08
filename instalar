@@ -717,7 +717,7 @@ server.listen(config.port, '127.0.0.1', () => {
 APPEOF
 
 # ----------------------------------------------------------------------
-# 8. FRONTEND (index.html) - CON TOAST EN TODAS LAS ACCIONES
+# 8. FRONTEND (index.html) - CON TOAST EN TODAS LAS ACCIONES, SIN MENSAJE INLINE DE BACKUP
 # ----------------------------------------------------------------------
 cat <<'HTMLEOF' > views/index.html
 <!DOCTYPE html>
@@ -1199,7 +1199,7 @@ cat <<'HTMLEOF' > views/index.html
                                     <i data-lucide="save" class="w-4 h-4"></i> Guardar
                                 </button>
                             </div>
-                            <p id="phone-saved-msg" class="text-xs mt-2 hidden"></p>
+                            <!-- Eliminado el mensaje inline phone-saved-msg -->
                         </div>
                         <div class="space-y-2">
                             <button onclick="downloadBackup()" class="w-full py-3 bg-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition text-sm">
@@ -1732,20 +1732,13 @@ cat <<'HTMLEOF' > views/index.html
 
         async function saveBackupPhone() {
             const bp = document.getElementById('conf-backup-phone').value.replace(/\D/g, '');
-            const msg = document.getElementById('phone-saved-msg');
             const res = await fetch('/api/config/backup-phone', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({backupPhone:bp}) });
             const data = await res.json();
-            msg.classList.remove('hidden');
             if (data.ok) { 
-                msg.textContent='✅ Número guardado'; 
-                msg.className='text-xs mt-2 text-green-500';
                 showToast('Número de backup guardado');
             } else { 
-                msg.textContent='❌ Error'; 
-                msg.className='text-xs mt-2 text-red-500';
                 showToast('Error al guardar', true);
             }
-            setTimeout(() => msg.classList.add('hidden'), 3000);
         }
 
         async function saveResponseDelay() {
@@ -1941,7 +1934,8 @@ echo "   ✅ Sincronización de contactos de WhatsApp cada 30 segundos"
 echo "   ✅ Selector de contactos con banderas de países"
 echo "   ✅ Detección de país por número (libphonenumber-js)"
 echo "   ✅ Bandera de República Dominicana para números 809/829/849"
-echo "   ✅ Toast de confirmación en todas las acciones del panel"
+echo "   ✅ Toast de confirmación en todas las acciones del panel (único mensaje)"
+echo "   ✅ Eliminado mensaje duplicado al guardar número de backup"
 echo "   ✅ Actualización en vivo vía sockets"
 echo "   ✅ Cierre de menú al hacer clic fuera en móvil"
 echo "   ✅ Eliminación automática de mensajes usados de 'Aprender'"
