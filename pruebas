@@ -1,16 +1,14 @@
 #!/bin/bash
 
 # ============================================================
-# GZMBOT - ENTERPRISE EDITION (CON DOMINIO, SSL, RETARDO Y CONTACTOS)
-# ============================================================
 
 clear
-echo "🚀 Iniciando Instalación de GZMBOT (con dominio, SSL, retardo y contactos)..."
+echo " ⚙️ Iniciando Instalación de GZMBOT"
 
 read -p "👤 Usuario Maestro: " ADMIN_USER
 read -sp "🔐 Contraseña Maestra: " ADMIN_PASS
 echo ""
-read -p "🌐 Dominio para el panel (ej: bot.tudominio.com): " DOMAIN
+read -p "🌐 Dominio para el panel : " DOMAIN
 
 if [ -z "$DOMAIN" ]; then
     echo "❌ Debes ingresar un dominio válido."
@@ -106,7 +104,7 @@ mkdir -p $HOME/gzmbot/backups
 cd $HOME/gzmbot
 
 # ----------------------------------------------------------------------
-# 6. CONFIG.JSON (PUERTO INTERNO 3000 + RETARDO)
+# 6. CONFIG.JSON (PUERTO INTERNO 3000 + RETARDO + INTERVALO COLA)
 # ----------------------------------------------------------------------
 cat <<EOF > config.json
 {
@@ -115,12 +113,13 @@ cat <<EOF > config.json
   "port": 3000,
   "sessionSecret": "$(openssl rand -hex 24)",
   "backupPhone": "",
-  "responseDelay": 0
+  "responseDelay": 0,
+  "queueInterval": 3000
 }
 EOF
 
 # ----------------------------------------------------------------------
-# 7. BACKEND (app.js) - CON RETARDO, SEGURIDAD Y CONTACTOS
+# 7. BACKEND (app.js) - CON COLA DE MENSAJES, RETARDO, CONTACTOS, ETC.
 # ----------------------------------------------------------------------
 cat <<'APPEOF' > app.js
 // Forzar timezone del proceso a RD
@@ -196,12 +195,61 @@ function nowRD() {
 // Helper para delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// ================== COLA DE MENSAJES ==================
+class MessageQueue {
+    constructor(intervalMs = 3000) {
+        this.queue = [];
+        this.intervalMs = intervalMs;
+        this.processing = false;
+    }
+
+    enqueue(chatId, message, options = {}) {
+        this.queue.push({ chatId, message, options });
+        this.process();
+    }
+
+    async process() {
+        if (this.processing || this.queue.length === 0) return;
+        this.processing = true;
+
+        while (this.queue.length > 0) {
+            const { chatId, message, options } = this.queue.shift();
+            try {
+                if (typeof message === 'string') {
+                    await client.sendMessage(chatId, message, options);
+                } else {
+                    // Es un objeto MessageMedia
+                    await client.sendMessage(chatId, message, options);
+                }
+                console.log(`📨 Mensaje enviado a ${chatId} - ${nowRD().format('HH:mm:ss')}`);
+            } catch (error) {
+                console.error(`❌ Error enviando mensaje a ${chatId}:`, error.message);
+            }
+            // Esperar el intervalo configurado
+            await new Promise(resolve => setTimeout(resolve, this.intervalMs));
+        }
+
+        this.processing = false;
+    }
+
+    // Actualizar intervalo (desde configuración)
+    setInterval(ms) {
+        this.intervalMs = ms;
+    }
+
+    // Obtener tamaño de la cola
+    size() {
+        return this.queue.length;
+    }
+}
+
 let client;
 let botStatus = "Desconectado";
 let lastQR = null;
 let lastQRImage = null;
 let isConnected = false;
 let contacts = []; // Lista de contactos { id, name, number }
+let messageQueue; // Se inicializará después de obtener la configuración
 
 console.log('🕐 Hora del servidor:', new Date().toString());
 console.log('🕐 Hora RD (moment):', nowRD().format('DD/MM/YYYY HH:mm:ss'));
@@ -214,6 +262,12 @@ io.on('connection', (socket) => {
     }
     // Enviar contactos al conectar
     socket.emit('contacts_update', contacts);
+    // Enviar tamaño de cola periódicamente (cada 2 segundos) solo a clientes conectados
+    setInterval(() => {
+        if (messageQueue) {
+            socket.emit('queue_size', messageQueue.size());
+        }
+    }, 2000);
 });
 
 // Actualizar contactos periódicamente
@@ -238,6 +292,10 @@ setInterval(async () => {
 }, 30000); // cada 30 segundos
 
 function initBot() {
+    // Inicializar la cola con el intervalo de configuración
+    const config = getConfig();
+    messageQueue = new MessageQueue(config.queueInterval || 3000);
+
     client = new Client({
         authStrategy: new LocalAuth({ dataPath: AUTH_PATH }),
         puppeteer: {
@@ -337,16 +395,17 @@ function initBot() {
                 if (trigger.mediaPaths && trigger.mediaPaths.length > 0) {
                     try {
                         const firstMedia = MessageMedia.fromFilePath(trigger.mediaPaths[0]);
-                        await msg.reply(firstMedia, null, { caption: trigger.response });
+                        // Enviar usando la cola
+                        messageQueue.enqueue(msg.from, firstMedia, { caption: trigger.response });
                         for (let i = 1; i < trigger.mediaPaths.length; i++) {
                             const media = MessageMedia.fromFilePath(trigger.mediaPaths[i]);
-                            await msg.reply(media);
+                            messageQueue.enqueue(msg.from, media);
                         }
                     } catch (e) {
-                        await msg.reply(trigger.response);
+                        messageQueue.enqueue(msg.from, trigger.response);
                     }
                 } else {
-                    await msg.reply(trigger.response);
+                    messageQueue.enqueue(msg.from, trigger.response);
                 }
                 db.stats.replied++;
             } else if (!msg.from.includes('@g.us')) {
@@ -403,13 +462,14 @@ async function sendBackupToWhatsApp(backupFile) {
         const chatId = freshConfig.backupPhone.includes('@') ?
             freshConfig.backupPhone : freshConfig.backupPhone + '@c.us';
         const media = MessageMedia.fromFilePath(backupFile);
-        await client.sendMessage(chatId, media, {
+        // Usar cola para el envío (aunque es un solo mensaje, por consistencia)
+        messageQueue.enqueue(chatId, media, {
             caption: '🔐 *Backup GZMBOT*\n\n📅 Fecha: ' + nowRD().format('DD/MM/YYYY HH:mm') + '\n🕐 Hora RD\n\n✅ Copia de seguridad completada'
         });
-        console.log('✅ Backup enviado a WhatsApp -', nowRD().format('HH:mm:ss'));
+        console.log('✅ Backup encolado para WhatsApp -', nowRD().format('HH:mm:ss'));
         return true;
     } catch (e) {
-        console.error('❌ Error enviando backup:', e);
+        console.error('❌ Error encolando backup:', e);
         return false;
     }
 }
@@ -420,7 +480,7 @@ cron.schedule('0 0 * * *', async () => {
     const bf = await createBackup();
     if (bf) {
         const sent = await sendBackupToWhatsApp(bf);
-        console.log('🔄 [CRON] Backup enviado:', sent);
+        console.log('🔄 [CRON] Backup encolado:', sent);
     }
 }, {
     scheduled: true,
@@ -441,12 +501,10 @@ cron.schedule('* * * * *', () => {
         const rem = db.reminders[i];
 
         if (rem.date === currentRD) {
-            console.log('🔔 Enviando recordatorio a', rem.name, '(' + rem.phone + ') -', currentRD);
+            console.log('🔔 Encolando recordatorio para', rem.name, '(' + rem.phone + ') -', currentRD);
 
             const chatId = rem.phone.includes('@') ? rem.phone : rem.phone + '@c.us';
-            client.sendMessage(chatId, rem.message)
-                .then(() => console.log('✅ Recordatorio enviado a', rem.name))
-                .catch(e => console.error("❌ Error recordatorio:", e.message));
+            messageQueue.enqueue(chatId, rem.message);
 
             if (rem.freq === 'Diario') {
                 rem.date = moment.tz(rem.date, TZ).add(1, 'days').format('YYYY-MM-DDTHH:mm');
@@ -497,6 +555,8 @@ app.get('/api/data', checkAuth, (req, res) => {
         isConnected,
         backupPhone: getConfig().backupPhone || '',
         responseDelay: getConfig().responseDelay || 0,
+        queueInterval: getConfig().queueInterval || 3000,
+        queueSize: messageQueue ? messageQueue.size() : 0,
         serverTime: nowRD().format('DD/MM/YYYY HH:mm:ss'),
         timezone: TZ
     });
@@ -654,6 +714,18 @@ app.post('/api/config/delay', checkAuth, (req, res) => {
     res.json({ ok: true });
 });
 
+// Endpoint para configurar intervalo de la cola
+app.post('/api/config/queue-interval', checkAuth, (req, res) => {
+    const fc = getConfig();
+    fc.queueInterval = parseInt(req.body.interval) || 3000;
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
+    if (messageQueue) {
+        messageQueue.setInterval(fc.queueInterval);
+    }
+    io.emit('config_update', { queueInterval: fc.queueInterval });
+    res.json({ ok: true });
+});
+
 app.get('/api/backup/download', checkAuth, async (req, res) => {
     try {
         const bf = await createBackup();
@@ -672,7 +744,7 @@ app.post('/api/backup/send', checkAuth, async (req, res) => {
     const bf = await createBackup();
     if (!bf) return res.json({ ok: false, message: 'Error creando backup' });
     const sent = await sendBackupToWhatsApp(bf);
-    res.json({ ok: sent, message: sent ? 'Backup enviado correctamente' : 'Error enviando backup' });
+    res.json({ ok: sent, message: sent ? 'Backup encolado correctamente' : 'Error encolando backup' });
 });
 
 app.post('/api/backup/restore', checkAuth, upload.single('backup'), (req, res) => {
@@ -717,7 +789,7 @@ server.listen(config.port, '127.0.0.1', () => {
 APPEOF
 
 # ----------------------------------------------------------------------
-# 8. FRONTEND (index.html) - CON SELECTOR DE CONTACTOS
+# 8. FRONTEND (index.html) - DISEÑO MODERNO Y PROFESIONAL (FONDO AZUL, BOTÓN ÚNICO NARANJA)
 # ----------------------------------------------------------------------
 cat <<'HTMLEOF' > views/index.html
 <!DOCTYPE html>
@@ -730,83 +802,92 @@ cat <<'HTMLEOF' > views/index.html
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <!-- Librería de banderas -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/6.6.6/css/flag-icons.min.css">
+    <!-- Librería para parsear números de teléfono -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.10.53/libphonenumber-js.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             background: #0a0a0f;
             color: #f4f4f5;
             font-family: 'Inter', sans-serif;
-            background-image: radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.03) 0%, transparent 50%);
+            background-image: radial-gradient(circle at 30% 10%, rgba(37, 99, 235, 0.08) 0%, transparent 40%);
         }
         .glass {
-            background: rgba(18, 18, 24, 0.8);
-            backdrop-filter: blur(12px);
+            background: rgba(18, 18, 24, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
             border: 1px solid rgba(255, 255, 255, 0.03);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.6);
         }
         .glass-card {
-            background: rgba(24, 24, 32, 0.7);
-            backdrop-filter: blur(8px);
+            background: rgba(24, 24, 32, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.02);
-            border-radius: 24px;
-            transition: transform 0.2s ease, border-color 0.2s;
+            border-radius: 28px;
+            transition: transform 0.2s ease, border-color 0.2s, box-shadow 0.3s;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
         }
         .glass-card:hover {
-            border-color: rgba(37, 99, 235, 0.3);
-            transform: translateY(-2px);
+            border-color: rgba(37, 99, 235, 0.4);
+            transform: translateY(-3px);
+            box-shadow: 0 15px 35px -10px #2563eb40;
         }
         .sidebar-item {
             display: flex;
             align-items: center;
             gap: 12px;
             padding: 12px 16px;
-            border-radius: 14px;
+            border-radius: 16px;
             color: #a1a1aa;
             transition: all 0.2s;
             cursor: pointer;
             font-weight: 500;
+            margin-bottom: 4px;
         }
         .sidebar-item:hover {
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(255, 255, 255, 0.05);
             color: #fff;
         }
         .sidebar-item.active {
             background: linear-gradient(135deg, #2563eb, #1d4ed8);
             color: #fff;
-            box-shadow: 0 8px 20px -8px #2563eb80;
+            box-shadow: 0 8px 20px -6px #2563eb;
         }
         .page {
             display: none;
-            animation: fadeIn 0.3s ease-out;
+            animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .page.active {
             display: block;
         }
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
+            from { opacity: 0; transform: translateY(12px); }
             to { opacity: 1; transform: translateY(0); }
         }
         input, select, textarea {
             background: #0f0f13 !important;
             border: 1px solid #27272a !important;
             color: #fff !important;
-            padding: 12px 16px !important;
-            border-radius: 14px !important;
+            padding: 14px 18px !important;
+            border-radius: 20px !important;
             outline: none;
             width: 100%;
             font-size: 15px;
-            transition: border 0.2s;
-        }
-        input[type="datetime-local"] {
-            padding: 10px 12px !important;
-            font-size: 14px !important;
-            min-height: 45px;
+            transition: border 0.2s, box-shadow 0.2s;
         }
         input:focus, textarea:focus, select:focus {
             border-color: #2563eb !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+        }
+        input[type="datetime-local"] {
+            padding: 12px 16px !important;
+            min-height: auto;
         }
         ::-webkit-scrollbar {
-            width: 5px;
+            width: 6px;
         }
         ::-webkit-scrollbar-thumb {
             background: #3f3f46;
@@ -816,40 +897,55 @@ cat <<'HTMLEOF' > views/index.html
             font-size: 2.5rem;
             font-weight: 800;
             line-height: 1;
-            color: #e5e7eb;
+            background: linear-gradient(to right, #e5e7eb, #a5b4fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .stat-value-orange {
+            background: linear-gradient(to right, #e5e7eb, #f97316);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
         .badge {
-            padding: 4px 10px;
-            border-radius: 30px;
+            padding: 4px 12px;
+            border-radius: 40px;
             font-size: 11px;
             font-weight: 600;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.4px;
             text-transform: uppercase;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.05);
         }
         .reminder-item, .learning-item {
-            background: rgba(39, 39, 45, 0.5);
-            border-radius: 16px;
-            padding: 14px;
+            background: rgba(39, 39, 45, 0.4);
+            border-radius: 20px;
+            padding: 16px;
             border: 1px solid rgba(255,255,255,0.02);
             margin-bottom: 8px;
+            transition: background 0.2s;
+        }
+        .reminder-item:hover, .learning-item:hover {
+            background: rgba(55, 55, 65, 0.5);
         }
         .aluminum-title {
-            color: #e5e7eb;
-            font-weight: 600;
+            color: #f0f0f3;
+            font-weight: 700;
             letter-spacing: -0.02em;
         }
         .aluminum-logo {
-            color: #f3f4f6;
+            background: linear-gradient(135deg, #ffffff, #cbd5e1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
             font-weight: 800;
             letter-spacing: -0.03em;
         }
-        .media-preview { max-width: 100px; max-height: 100px; border-radius: 12px; margin: 4px; object-fit: cover; }
-        .media-type-selector { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-        .media-type-btn { padding: 8px 16px; background: #0f0f13; border: 1px solid #27272a; border-radius: 10px; cursor: pointer; transition: all 0.3s; color: #fff; font-size: 14px; }
-        .media-type-btn.active { background: #2563eb; border-color: #2563eb; }
-        .media-preview-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .media-preview { max-width: 100px; max-height: 100px; border-radius: 16px; margin: 4px; object-fit: cover; border: 1px solid #2a2a2e; }
+        .media-type-selector { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .media-type-btn { padding: 8px 18px; background: #0f0f13; border: 1px solid #27272a; border-radius: 14px; cursor: pointer; transition: all 0.3s; color: #fff; font-size: 14px; font-weight: 500; }
+        .media-type-btn.active { background: #2563eb; border-color: #2563eb; box-shadow: 0 4px 12px #2563eb50; }
+        .media-preview-container { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
         .media-item { position: relative; }
-        .media-remove { position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 12px; font-weight: bold; }
+        .media-remove { position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; font-weight: bold; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
         .preserve-whitespace { white-space: pre-wrap; word-break: break-word; }
 
         /* Modal de contactos */
@@ -857,7 +953,8 @@ cat <<'HTMLEOF' > views/index.html
             display: none;
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(8px);
             align-items: center;
             justify-content: center;
             z-index: 1000;
@@ -866,176 +963,332 @@ cat <<'HTMLEOF' > views/index.html
             display: flex;
         }
         .modal-content {
-            background: #18181c;
-            border-radius: 32px;
-            max-width: 500px;
+            background: #1c1c22;
+            border-radius: 40px;
+            max-width: 520px;
             width: 90%;
             max-height: 80vh;
             overflow-y: auto;
-            padding: 20px;
-            border: 1px solid #2a2a2e;
+            padding: 24px;
+            border: 1px solid #2f2f37;
+            box-shadow: 0 30px 50px -20px black;
         }
         .contact-item {
-            padding: 12px;
-            border-bottom: 1px solid #27272a;
+            padding: 14px;
+            border-radius: 18px;
             cursor: pointer;
             transition: background 0.2s;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 14px;
+            border-bottom: 1px solid #2a2a30;
         }
         .contact-item:hover {
-            background: #2a2a2e;
+            background: #2a2a32;
         }
         .contact-item.selected {
             background: #2563eb20;
-            border-left: 3px solid #2563eb;
+            border-left: 4px solid #2563eb;
         }
         .contact-name {
-            font-weight: 500;
+            font-weight: 600;
             color: #e5e7eb;
         }
         .contact-number {
-            font-size: 12px;
+            font-size: 13px;
+            color: #9ca3af;
+        }
+        .fi {
+            margin-right: 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #23232b;
+            border-left: 5px solid #2563eb;
+            padding: 14px 24px;
+            border-radius: 40px;
+            box-shadow: 0 20px 35px -8px black;
+            transform: translateY(120px);
+            opacity: 0;
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            z-index: 2000;
+            color: #fff;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            backdrop-filter: blur(8px);
+        }
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        /* Reloj moderno */
+        .clock-modern {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            line-height: 1.2;
+        }
+        .clock-time {
+            font-size: clamp(2rem, 5vw, 3.2rem);
+            font-weight: 800;
+            background: linear-gradient(to right, #2563eb, #60a5fa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.02em;
+        }
+        .clock-date {
+            font-size: clamp(0.85rem, 2vw, 1.1rem);
             color: #a1a1aa;
+            font-weight: 400;
+            text-transform: capitalize;
+        }
+        /* QR mejorado */
+        #qr-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: white;
+            border-radius: 32px;
+            padding: 20px;
+            box-shadow: 0 20px 40px -10px rgba(0,0,0,0.5), 0 0 0 2px rgba(37,99,235,0.2);
+        }
+        #qr-img {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 240px;
+            height: 240px;
+        }
+        #qr-img img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 16px;
+        }
+        /* Botón de desvincular mejorado */
+        #btn-logout-wa {
+            transition: all 0.3s ease;
+        }
+        /* Logo del bot moderno */
+        .bot-logo {
+            background: linear-gradient(145deg, #2563eb, #1e40af);
+            box-shadow: 0 10px 20px -5px #2563eb80, 0 0 0 2px rgba(255,255,255,0.05) inset;
+            border-radius: 18px;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .bot-logo i {
+            color: white;
+            width: 28px;
+            height: 28px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+        }
+        /* Sliders con colores personalizados */
+        input[type=range] {
+            -webkit-appearance: none;
+            height: 8px;
+            border-radius: 10px;
+            background: #2a2a30;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        #response-delay::-webkit-slider-thumb {
+            background: #2563eb;
+            border: 2px solid #ffffff30;
+        }
+        #queue-interval::-webkit-slider-thumb {
+            background: #f97316;
+            border: 2px solid #ffffff30;
+        }
+        /* Tarjeta unificada de configuración */
+        .config-card {
+            background: rgba(24, 24, 32, 0.7);
+            backdrop-filter: blur(12px);
+            border-radius: 28px;
+            padding: 28px;
+            border: 1px solid rgba(255,255,255,0.03);
+        }
+        .config-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.05);
+            margin: 24px 0;
+        }
+        /* Botón guardar configuración naranja moderno */
+        .btn-save-config {
+            background: #f97316;
+            box-shadow: 0 10px 20px -8px #f97316;
+            transition: all 0.2s ease;
+        }
+        .btn-save-config:hover {
+            background: #ea580c;
+            transform: translateY(-2px);
+            box-shadow: 0 15px 25px -10px #f97316;
+        }
+        .btn-save-config:active {
+            transform: translateY(0);
         }
     </style>
 </head>
 <body class="flex h-screen overflow-hidden">
 
+    <!-- TOAST -->
+    <div id="toast" class="toast">
+        <i data-lucide="check-circle" class="text-green-500 w-5 h-5"></i>
+        <span id="toast-message">Guardado correctamente</span>
+    </div>
+
     <!-- MODAL DE CONTACTOS -->
     <div id="contactModal" class="modal" onclick="if(event.target===this) closeContactModal()">
         <div class="modal-content glass">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-xl font-bold aluminum-title">Seleccionar contacto</h3>
-                <button onclick="closeContactModal()" class="text-zinc-400 hover:text-white">
-                    <i data-lucide="x" class="w-5 h-5"></i>
+            <div class="flex justify-between items-center mb-5">
+                <h3 class="text-2xl font-bold aluminum-title">Seleccionar contacto</h3>
+                <button onclick="closeContactModal()" class="text-zinc-400 hover:text-white p-2 hover:bg-white/5 rounded-full transition">
+                    <i data-lucide="x" class="w-6 h-6"></i>
                 </button>
             </div>
-            <input type="text" id="contactSearch" placeholder="Buscar contacto..." class="mb-4">
-            <div id="contactList" class="space-y-1 max-h-96 overflow-y-auto"></div>
-            <div class="mt-4 text-right">
-                <button onclick="closeContactModal()" class="px-4 py-2 bg-zinc-700 rounded-xl">Cancelar</button>
+            <input type="text" id="contactSearch" placeholder="Buscar contacto..." class="mb-5">
+            <div id="contactList" class="space-y-1 max-h-96 overflow-y-auto pr-1"></div>
+            <div class="mt-6 text-right">
+                <button onclick="closeContactModal()" class="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 rounded-2xl font-medium transition">Cancelar</button>
             </div>
         </div>
     </div>
 
     <!-- SIDEBAR -->
-    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r border-white/5 -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-5 overflow-y-auto">
-        <div class="flex items-center gap-3 mb-8 px-3">
-            <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-500 rounded-xl flex items-center justify-center shadow-xl flex-shrink-0">
-                <i data-lucide="bot" class="text-white w-5 h-5"></i>
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r border-white/5 -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-6 overflow-y-auto">
+        <div class="flex items-center gap-3 mb-10 px-2">
+            <div class="bot-logo">
+                <i data-lucide="bot" class="w-7 h-7"></i>
             </div>
-            <span class="text-xl font-extrabold tracking-tight aluminum-logo">GZMBOT</span>
+            <span class="text-2xl font-extrabold tracking-tight aluminum-logo">GZMBOT</span>
         </div>
         <nav class="space-y-1 flex-1">
-            <div onclick="nav('dash'); if(window.innerWidth<1024) toggleSidebar()" id="n-dash" class="sidebar-item active"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></div>
-            <div onclick="nav('conn'); if(window.innerWidth<1024) toggleSidebar()" id="n-conn" class="sidebar-item"><i data-lucide="qr-code"></i><span>Conexión</span></div>
-            <div onclick="nav('train'); if(window.innerWidth<1024) toggleSidebar()" id="n-train" class="sidebar-item"><i data-lucide="message-square"></i><span>Respuestas</span></div>
-            <div onclick="nav('learn'); if(window.innerWidth<1024) toggleSidebar()" id="n-learn" class="sidebar-item"><i data-lucide="brain"></i><span>Aprender</span></div>
-            <div onclick="nav('rem'); if(window.innerWidth<1024) toggleSidebar()" id="n-rem" class="sidebar-item"><i data-lucide="bell"></i><span>Recordatorios</span></div>
-            <div onclick="nav('excl'); if(window.innerWidth<1024) toggleSidebar()" id="n-excl" class="sidebar-item"><i data-lucide="shield-off"></i><span>Excluidos</span></div>
-            <div onclick="nav('config'); if(window.innerWidth<1024) toggleSidebar()" id="n-config" class="sidebar-item"><i data-lucide="settings"></i><span>Ajustes</span></div>
+            <div onclick="nav('dash'); if(window.innerWidth<1024) toggleSidebar()" id="n-dash" class="sidebar-item active"><i data-lucide="layout-dashboard" class="w-5 h-5"></i><span>Dashboard</span></div>
+            <div onclick="nav('conn'); if(window.innerWidth<1024) toggleSidebar()" id="n-conn" class="sidebar-item"><i data-lucide="qr-code" class="w-5 h-5"></i><span>Conexión</span></div>
+            <div onclick="nav('train'); if(window.innerWidth<1024) toggleSidebar()" id="n-train" class="sidebar-item"><i data-lucide="message-square" class="w-5 h-5"></i><span>Respuestas</span></div>
+            <div onclick="nav('learn'); if(window.innerWidth<1024) toggleSidebar()" id="n-learn" class="sidebar-item"><i data-lucide="brain" class="w-5 h-5"></i><span>Aprender</span></div>
+            <div onclick="nav('rem'); if(window.innerWidth<1024) toggleSidebar()" id="n-rem" class="sidebar-item"><i data-lucide="bell" class="w-5 h-5"></i><span>Recordatorios</span></div>
+            <div onclick="nav('excl'); if(window.innerWidth<1024) toggleSidebar()" id="n-excl" class="sidebar-item"><i data-lucide="shield-off" class="w-5 h-5"></i><span>Excluidos</span></div>
+            <div onclick="nav('config'); if(window.innerWidth<1024) toggleSidebar()" id="n-config" class="sidebar-item"><i data-lucide="settings" class="w-5 h-5"></i><span>Ajustes</span></div>
         </nav>
         <button onclick="location.href='/login'" class="sidebar-item text-red-400 hover:bg-red-500/10 mt-6">
-            <i data-lucide="log-out"></i><span>Salir</span>
+            <i data-lucide="log-out" class="w-5 h-5"></i><span>Salir</span>
         </button>
     </aside>
 
     <!-- MAIN CONTENT -->
     <main id="main-content" class="flex-1 flex flex-col min-w-0 overflow-hidden" onclick="if(window.innerWidth<1024 && !document.getElementById('sidebar').classList.contains('-translate-x-full')) toggleSidebar()">
-        <header class="lg:hidden p-4 glass border-b border-white/5 flex justify-between items-center flex-shrink-0">
-            <span class="font-bold text-lg aluminum-logo">GZMBOT</span>
-            <button onclick="toggleSidebar(); event.stopPropagation()" class="p-2 text-zinc-400 hover:text-white">
-                <i data-lucide="menu"></i>
+        <header class="lg:hidden p-5 glass border-b border-white/5 flex justify-between items-center flex-shrink-0">
+            <span class="font-bold text-xl aluminum-logo">GZMBOT</span>
+            <button onclick="toggleSidebar(); event.stopPropagation()" class="p-2.5 text-zinc-400 hover:text-white hover:bg-white/5 rounded-xl transition">
+                <i data-lucide="menu" class="w-6 h-6"></i>
             </button>
         </header>
 
-        <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
+        <div class="flex-1 overflow-y-auto p-5 sm:p-7 lg:p-9 space-y-7">
 
             <!-- ========== DASHBOARD ========== -->
             <div id="p-dash" class="page active">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-                    <h1 class="text-3xl font-bold aluminum-title">Panel de Control</h1>
-                    <div class="flex items-center gap-4">
-                        <div id="server-clock" class="text-sm text-zinc-500 font-mono bg-white/5 px-4 py-2 rounded-full"></div>
-                        <div class="px-4 py-2 glass-card flex items-center gap-2">
-                            <div id="dot" class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></div>
-                            <span id="bot-status" class="text-xs font-semibold uppercase tracking-wider text-zinc-400">Desconectado</span>
-                        </div>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5 mb-8">
+                    <h1 class="text-4xl font-bold aluminum-title">Panel de Control</h1>
+                    <!-- RELOJ MODERNO -->
+                    <div id="server-clock" class="clock-modern">
+                        <div class="clock-time" id="clock-time">--:--:-- --</div>
+                        <div class="clock-date" id="clock-date">cargando...</div>
+                    </div>
+                    <div class="px-5 py-3 glass-card flex items-center gap-3">
+                        <div id="dot" class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+                        <span id="bot-status" class="text-xs font-semibold uppercase tracking-wider text-zinc-300">Desconectado</span>
                     </div>
                 </div>
 
                 <!-- Tarjetas de estadísticas principales -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
-                    <div class="glass-card p-6 flex items-center gap-4">
-                        <div class="w-14 h-14 rounded-2xl bg-blue-500/20 flex items-center justify-center">
-                            <i data-lucide="message-circle" class="w-7 h-7 text-blue-400"></i>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-10">
+                    <div class="glass-card p-7 flex items-center gap-5">
+                        <div class="w-16 h-16 rounded-2xl bg-blue-500/20 flex items-center justify-center">
+                            <i data-lucide="message-circle" class="w-8 h-8 text-blue-400"></i>
                         </div>
                         <div>
-                            <p class="text-zinc-500 text-sm font-medium">Respondidas</p>
+                            <p class="text-zinc-400 text-sm font-medium mb-1">Respondidas</p>
                             <h2 id="s-replied" class="stat-value">0</h2>
                         </div>
                     </div>
-                    <div class="glass-card p-6 flex items-center gap-4">
-                        <div class="w-14 h-14 rounded-2xl bg-purple-500/20 flex items-center justify-center">
-                            <i data-lucide="users" class="w-7 h-7 text-purple-400"></i>
+                    <div class="glass-card p-7 flex items-center gap-5">
+                        <div class="w-16 h-16 rounded-2xl bg-orange-500/20 flex items-center justify-center">
+                            <i data-lucide="users" class="w-8 h-8 text-orange-400"></i>
                         </div>
                         <div>
-                            <p class="text-zinc-500 text-sm font-medium">Total mensajes</p>
-                            <h2 id="s-total" class="stat-value">0</h2>
+                            <p class="text-zinc-400 text-sm font-medium mb-1">Total mensajes</p>
+                            <h2 id="s-total" class="stat-value stat-value-orange">0</h2>
                         </div>
                     </div>
                 </div>
 
                 <!-- Recordatorios de hoy -->
-                <div class="glass-card p-6 mb-8">
-                    <div class="flex items-center gap-3 mb-4">
-                        <i data-lucide="bell" class="w-5 h-5 text-emerald-400"></i>
-                        <h3 class="font-semibold text-lg aluminum-title">Recordatorios de hoy</h3>
+                <div class="glass-card p-7 mb-10">
+                    <div class="flex items-center gap-3 mb-5">
+                        <i data-lucide="bell" class="w-6 h-6 text-emerald-400"></i>
+                        <h3 class="font-semibold text-xl aluminum-title">Recordatorios de hoy</h3>
                         <span class="badge bg-emerald-500/10 text-emerald-400 ml-auto">HOY</span>
                     </div>
-                    <div id="today-reminders-list" class="space-y-2">
-                        <div class="text-zinc-500 text-sm py-4 text-center">Cargando...</div>
+                    <div id="today-reminders-list" class="space-y-3">
+                        <div class="text-zinc-500 text-sm py-5 text-center">Cargando...</div>
                     </div>
-                    <button onclick="nav('rem')" class="mt-3 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1">
+                    <button onclick="nav('rem')" class="mt-4 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1 font-medium">
                         Ver todos <i data-lucide="arrow-right" class="w-4 h-4"></i>
                     </button>
                 </div>
 
                 <!-- Últimos mensajes sin respuesta -->
-                <div class="glass-card p-6">
-                    <div class="flex items-center gap-3 mb-4">
-                        <i data-lucide="brain" class="w-5 h-5 text-amber-400"></i>
-                        <h3 class="font-semibold text-lg aluminum-title">Últimos mensajes sin respuesta</h3>
+                <div class="glass-card p-7">
+                    <div class="flex items-center gap-3 mb-5">
+                        <i data-lucide="brain" class="w-6 h-6 text-amber-400"></i>
+                        <h3 class="font-semibold text-xl aluminum-title">Últimos mensajes sin respuesta</h3>
                     </div>
-                    <div id="recent-learning-list" class="space-y-2 max-h-80 overflow-y-auto pr-2">
-                        <div class="text-zinc-500 text-sm py-4 text-center">No hay datos</div>
+                    <div id="recent-learning-list" class="space-y-3 max-h-80 overflow-y-auto pr-2">
+                        <div class="text-zinc-500 text-sm py-5 text-center">No hay datos</div>
                     </div>
-                    <button onclick="nav('learn')" class="mt-3 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1">
+                    <button onclick="nav('learn')" class="mt-4 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1 font-medium">
                         Ir a aprender <i data-lucide="arrow-right" class="w-4 h-4"></i>
                     </button>
                 </div>
             </div>
 
-            <!-- ========== CONEXIÓN ========== -->
+            <!-- ========== CONEXIÓN (QR MEJORADO) ========== -->
             <div id="p-conn" class="page">
-                <h2 class="text-2xl font-bold aluminum-title mb-6">Conexión WhatsApp</h2>
-                <div class="max-w-md mx-auto glass-card p-8 text-center">
-                    <div id="qr-container" class="bg-white p-4 rounded-3xl inline-block mb-6">
-                        <div id="qr-img" class="w-64 h-64 flex items-center justify-center text-black font-bold">
+                <h2 class="text-3xl font-bold aluminum-title mb-6">Conexión WhatsApp</h2>
+                <div class="max-w-lg mx-auto glass-card p-10 text-center">
+                    <div id="qr-container" class="inline-block mb-7">
+                        <div id="qr-img" class="flex items-center justify-center">
                             <span class="text-sm text-gray-500">Esperando código QR...</span>
                         </div>
                     </div>
-                    <div id="connected-container" class="hidden mb-6">
-                        <div class="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>
+                    <div id="connected-container" class="hidden mb-7">
+                        <div class="w-28 h-28 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-5">
+                            <i data-lucide="check-circle" class="w-14 h-14 text-green-500"></i>
                         </div>
                         <h2 class="text-2xl font-bold text-green-500 mb-2">WhatsApp Vinculado</h2>
-                        <p class="text-zinc-500">El bot está conectado y funcionando.</p>
+                        <p class="text-zinc-400">El bot está conectado y funcionando.</p>
                     </div>
-                    <h2 class="text-xl font-bold aluminum-title mb-2">Escanear código QR</h2>
-                    <p class="text-zinc-500 text-sm mb-6">Usa WhatsApp para vincular el bot.</p>
+                    <h2 class="text-2xl font-bold aluminum-title mb-2">Escanear código QR</h2>
+                    <p class="text-zinc-400 text-sm mb-7">Usa WhatsApp para vincular el bot.</p>
                     <button id="btn-logout-wa" onclick="logoutWA()" class="hidden w-full py-4 bg-red-500/10 text-red-500 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition">
                         <i data-lucide="unlink" class="inline w-4 h-4 mr-2"></i>DESVINCULAR
                     </button>
@@ -1044,40 +1297,40 @@ cat <<'HTMLEOF' > views/index.html
 
             <!-- ========== RESPUESTAS ========== -->
             <div id="p-train" class="page">
-                <h2 class="text-2xl font-bold aluminum-title mb-4">Gestión de Respuestas</h2>
-                <div class="mb-4 flex gap-2 flex-wrap">
-                    <button onclick="downloadTemplate()" class="px-4 py-2 bg-purple-600 rounded-xl font-bold flex items-center gap-2 hover:bg-purple-700 transition text-sm">
+                <h2 class="text-3xl font-bold aluminum-title mb-5">Gestión de Respuestas</h2>
+                <div class="mb-5 flex gap-3 flex-wrap">
+                    <button onclick="downloadTemplate()" class="px-5 py-3 bg-purple-600 rounded-xl font-bold flex items-center gap-2 hover:bg-purple-700 transition text-sm shadow-lg">
                         <i data-lucide="download" class="w-4 h-4"></i>Plantilla
                     </button>
-                    <button onclick="document.getElementById('import-file').click()" class="px-4 py-2 bg-green-600 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition text-sm">
+                    <button onclick="document.getElementById('import-file').click()" class="px-5 py-3 bg-green-600 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition text-sm shadow-lg">
                         <i data-lucide="upload" class="w-4 h-4"></i>Importar
                     </button>
-                    <button onclick="exportTraining()" class="px-4 py-2 bg-orange-600 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-700 transition text-sm">
+                    <button onclick="exportTraining()" class="px-5 py-3 bg-orange-600 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-700 transition text-sm shadow-lg">
                         <i data-lucide="file-text" class="w-4 h-4"></i>Exportar
                     </button>
                     <input type="file" id="import-file" accept=".txt" class="hidden" onchange="importTraining(this)">
                 </div>
-                <div class="grid lg:grid-cols-3 gap-4 sm:gap-8">
-                    <div class="lg:col-span-1 glass p-4 sm:p-6 rounded-2xl h-fit">
-                        <h3 class="font-bold mb-4 flex items-center gap-2 aluminum-title"><i data-lucide="plus-circle" class="text-blue-500"></i> Nueva Regla</h3>
+                <div class="grid lg:grid-cols-3 gap-5 sm:gap-8">
+                    <div class="lg:col-span-1 glass p-6 sm:p-7 rounded-3xl h-fit">
+                        <h3 class="font-bold mb-5 flex items-center gap-2 aluminum-title text-lg"><i data-lucide="plus-circle" class="text-blue-500 w-5 h-5"></i> Nueva Regla</h3>
                         <form id="train-form" enctype="multipart/form-data" onsubmit="saveTrain(event)">
                             <input type="hidden" id="t-id">
-                            <input type="text" id="t-key" placeholder="Cuando digan..." class="mb-3" required>
-                            <textarea id="t-res" placeholder="Responder..." class="h-28 mb-4" required></textarea>
-                            <div class="mb-4">
+                            <input type="text" id="t-key" placeholder="Cuando digan..." class="mb-4" required>
+                            <textarea id="t-res" placeholder="Responder..." class="h-28 mb-5" required></textarea>
+                            <div class="mb-5">
                                 <label class="block text-sm text-zinc-400 mb-2">Tipo:</label>
                                 <div class="media-type-selector">
-                                    <button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="inline w-4 h-4"></i> Texto</button>
-                                    <button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="inline w-4 h-4"></i> Imagen</button>
-                                    <button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="inline w-4 h-4"></i> Video</button>
+                                    <button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="inline w-4 h-4 mr-1"></i> Texto</button>
+                                    <button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="inline w-4 h-4 mr-1"></i> Imagen</button>
+                                    <button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="inline w-4 h-4 mr-1"></i> Video</button>
                                 </div>
                             </div>
-                            <div id="media-upload" class="hidden mb-4">
+                            <div id="media-upload" class="hidden mb-5">
                                 <label class="block text-sm text-zinc-400 mb-2">Archivos (máx 10):</label>
                                 <input type="file" id="t-media" accept="image/*,video/*" multiple>
                                 <div id="media-preview" class="media-preview-container"></div>
                             </div>
-                            <button type="submit" class="w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Guardar</button>
+                            <button type="submit" class="w-full py-4 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition shadow-lg">Guardar</button>
                         </form>
                     </div>
                     <div id="l-train" class="lg:col-span-2 space-y-3"></div>
@@ -1086,28 +1339,30 @@ cat <<'HTMLEOF' > views/index.html
 
             <!-- ========== APRENDER ========== -->
             <div id="p-learn" class="page">
-                <h2 class="text-2xl font-bold aluminum-title mb-4">Bandeja de Aprendizaje</h2>
-                <p class="text-zinc-500 text-sm mb-4">Conversaciones que el bot no supo responder</p>
+                <h2 class="text-3xl font-bold aluminum-title mb-4">Bandeja de Aprendizaje</h2>
+                <p class="text-zinc-400 text-sm mb-5">Conversaciones que el bot no supo responder</p>
                 <div id="l-learn" class="space-y-3"></div>
             </div>
 
             <!-- ========== RECORDATORIOS ========== -->
             <div id="p-rem" class="page">
-                <h2 class="text-2xl font-bold aluminum-title mb-4">Recordatorios</h2>
-                <div class="glass p-4 sm:p-8 rounded-2xl mb-6">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="font-bold text-base sm:text-lg aluminum-title">Programar Recordatorio</h3>
-                        <span id="rem-clock" class="text-xs text-zinc-500 font-mono"></span>
-                    </div>
-                    <p class="text-xs text-zinc-500 mb-4">⏰ Hora República Dominicana (UTC-4)</p>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                        <input type="hidden" id="r-id">
-                        <div class="relative">
-                            <input type="text" id="r-name" placeholder="Nombre">
+                <h2 class="text-3xl font-bold aluminum-title mb-5">Recordatorios</h2>
+                <div class="glass p-6 sm:p-9 rounded-3xl mb-8">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                        <h3 class="font-bold text-xl aluminum-title">Programar Recordatorio</h3>
+                        <!-- RELOJ DE RECORDATORIOS -->
+                        <div class="clock-modern">
+                            <div class="clock-time" id="rem-clock-time">--:--:-- --</div>
+                            <div class="clock-date" id="rem-clock-date">cargando...</div>
                         </div>
+                    </div>
+                    <p class="text-xs text-zinc-500 mb-5">⏰ Hora República Dominicana (UTC-4)</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <input type="hidden" id="r-id">
+                        <input type="text" id="r-name" placeholder="Nombre">
                         <div class="relative flex items-center gap-2">
                             <input type="text" id="r-phone" placeholder="Número (ej: 18091234567)" class="flex-1">
-                            <button type="button" onclick="openContactModal('r-phone', 'r-name')" class="p-3 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition">
+                            <button type="button" onclick="openContactModal('r-phone', 'r-name')" class="p-3.5 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition">
                                 <i data-lucide="users" class="w-5 h-5"></i>
                             </button>
                         </div>
@@ -1115,79 +1370,110 @@ cat <<'HTMLEOF' > views/index.html
                         <select id="r-freq"><option>Una vez</option><option>Diario</option><option>Semanal</option><option>Mensual</option><option>Anual</option></select>
                         <input type="datetime-local" id="r-date">
                     </div>
-                    <button onclick="saveRem()" class="mt-4 w-full sm:w-auto px-8 py-3 bg-emerald-600 rounded-2xl font-bold hover:bg-emerald-700 transition">Programar</button>
+                    <button onclick="saveRem()" class="mt-6 w-full sm:w-auto px-10 py-4 bg-emerald-600 rounded-2xl font-bold hover:bg-emerald-700 transition shadow-lg">Programar</button>
                 </div>
-                <div id="l-rem" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                <div id="l-rem" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
             </div>
 
             <!-- ========== EXCLUIDOS ========== -->
             <div id="p-excl" class="page">
-                <h2 class="text-2xl font-bold aluminum-title mb-4">Números Excluidos</h2>
-                <div class="w-full max-w-xl mx-auto glass p-4 sm:p-8 rounded-2xl">
-                    <div class="flex flex-col sm:flex-row gap-2">
+                <h2 class="text-3xl font-bold aluminum-title mb-5">Números Excluidos</h2>
+                <div class="w-full max-w-2xl mx-auto glass p-6 sm:p-9 rounded-3xl">
+                    <div class="flex flex-col sm:flex-row gap-3">
                         <input type="text" id="e-name" placeholder="Nombre" class="flex-1">
                         <div class="flex items-center gap-2 flex-1">
                             <input type="text" id="e-phone" placeholder="Número" class="flex-1">
-                            <button type="button" onclick="openContactModal('e-phone', 'e-name')" class="p-3 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition">
+                            <button type="button" onclick="openContactModal('e-phone', 'e-name')" class="p-3.5 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition">
                                 <i data-lucide="users" class="w-5 h-5"></i>
                             </button>
                         </div>
-                        <button onclick="saveExcl()" class="bg-white text-black px-6 py-3 font-bold rounded-xl hover:bg-zinc-200 transition whitespace-nowrap">Añadir</button>
+                        <button onclick="saveExcl()" class="bg-white text-black px-7 py-3.5 font-bold rounded-xl hover:bg-zinc-200 transition whitespace-nowrap">Añadir</button>
                     </div>
-                    <div id="l-excl" class="mt-6 space-y-2"></div>
+                    <div id="l-excl" class="mt-7 space-y-2"></div>
                 </div>
             </div>
 
-            <!-- ========== AJUSTES ========== -->
+            <!-- ========== AJUSTES (REDISEÑADOS) ========== -->
             <div id="p-config" class="page">
-                <h2 class="text-2xl font-bold aluminum-title mb-4">Configuración</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 max-w-4xl mx-auto">
-                    <div class="glass p-5 sm:p-10 rounded-2xl">
+                <h2 class="text-3xl font-bold aluminum-title mb-5">Configuración</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-7 max-w-5xl mx-auto">
+                    <!-- Credenciales -->
+                    <div class="config-card">
                         <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-6">Credenciales de Acceso</h2>
-                        <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-3">
-                        <input type="password" id="conf-pass" placeholder="Nueva Contraseña" class="mb-6">
-                        <button onclick="saveCredentials()" class="w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Actualizar</button>
+                        <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-4">
+                        <input type="password" id="conf-pass" placeholder="Nueva Contraseña" class="mb-7">
+                        <button onclick="saveCredentials()" class="w-full py-4 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition shadow-lg">Actualizar</button>
                     </div>
-                    <div class="glass p-5 sm:p-10 rounded-2xl">
-                        <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-4">Copias de Seguridad</h2>
-                        <div class="mb-5">
+                    <!-- Backups -->
+                    <div class="config-card">
+                        <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-5">Copias de Seguridad</h2>
+                        <div class="mb-6">
                             <p class="text-xs sm:text-sm text-zinc-400 mb-2">Número para backups:</p>
                             <div class="flex gap-2">
                                 <div class="flex items-center gap-2 flex-1">
                                     <input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="flex-1">
-                                    <button type="button" onclick="openContactModal('conf-backup-phone', null)" class="p-3 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition">
+                                    <button type="button" onclick="openContactModal('conf-backup-phone', null)" class="p-3.5 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition">
                                         <i data-lucide="users" class="w-5 h-5"></i>
                                     </button>
                                 </div>
-                                <button onclick="saveBackupPhone()" class="px-4 py-3 bg-emerald-600 rounded-xl font-bold hover:bg-emerald-700 transition flex items-center gap-1 text-sm whitespace-nowrap">
+                                <button onclick="saveBackupPhone()" class="px-5 py-3.5 bg-emerald-600 rounded-xl font-bold hover:bg-emerald-700 transition flex items-center gap-1 text-sm whitespace-nowrap">
                                     <i data-lucide="save" class="w-4 h-4"></i> Guardar
                                 </button>
                             </div>
-                            <p id="phone-saved-msg" class="text-xs mt-2 hidden"></p>
                         </div>
-                        <div class="space-y-2">
-                            <button onclick="downloadBackup()" class="w-full py-3 bg-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition text-sm">
+                        <div class="space-y-3">
+                            <button onclick="downloadBackup()" class="w-full py-4 bg-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition text-sm shadow-lg">
                                 <i data-lucide="download" class="w-4 h-4"></i>Descargar Backup
                             </button>
-                            <button onclick="sendBackupManually()" class="w-full py-3 bg-blue-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition text-sm">
+                            <button onclick="sendBackupManually()" class="w-full py-4 bg-blue-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition text-sm shadow-lg">
                                 <i data-lucide="send" class="w-4 h-4"></i>Enviar a WhatsApp
                             </button>
-                            <button onclick="document.getElementById('restore-file').click()" class="w-full py-3 bg-orange-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-orange-700 transition text-sm">
+                            <button onclick="document.getElementById('restore-file').click()" class="w-full py-4 bg-orange-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-orange-700 transition text-sm shadow-lg">
                                 <i data-lucide="upload" class="w-4 h-4"></i>Restaurar Backup
                             </button>
                             <input type="file" id="restore-file" accept=".json" class="hidden" onchange="restoreBackup(this)">
                         </div>
-                        <p class="text-xs text-zinc-500 mt-4">💡 Backup diario 12:00 AM hora RD.</p>
+                        <p class="text-xs text-zinc-500 mt-5">💡 Backup diario 12:00 AM hora RD.</p>
                     </div>
-                    <!-- NUEVA TARJETA: RETARDO -->
-                    <div class="glass p-5 sm:p-10 rounded-2xl">
-                        <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-4">Configuración de Respuesta</h2>
-                        <p class="text-sm text-zinc-400 mb-4">Tiempo de espera antes de responder (segundos)</p>
-                        <div class="flex items-center gap-4">
-                            <input type="range" id="response-delay" min="0" max="10" step="0.5" value="0" class="flex-1">
-                            <span id="delay-value" class="text-lg font-mono text-blue-400">0.0 s</span>
+                    <!-- Tarjeta unificada: Retardo + Intervalo de Cola (con un solo botón naranja) -->
+                    <div class="config-card md:col-span-2">
+                        <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-6">Configuración de Envío</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Retardo -->
+                            <div>
+                                <div class="flex items-center gap-2 mb-2">
+                                    <i data-lucide="clock" class="w-5 h-5 text-blue-400"></i>
+                                    <span class="font-medium text-zinc-300">Tiempo de espera</span>
+                                </div>
+                                <p class="text-xs text-zinc-500 mb-4">Segundos antes de responder</p>
+                                <div class="flex items-center gap-4">
+                                    <input type="range" id="response-delay" min="0" max="10" step="0.5" value="0" class="flex-1">
+                                    <span id="delay-value" class="text-lg font-mono text-blue-400 min-w-[60px]">0.0 s</span>
+                                </div>
+                            </div>
+                            <!-- Intervalo de Cola -->
+                            <div>
+                                <div class="flex items-center gap-2 mb-2">
+                                    <i data-lucide="layers" class="w-5 h-5 text-orange-400"></i>
+                                    <span class="font-medium text-zinc-300">Intervalo entre mensajes</span>
+                                </div>
+                                <p class="text-xs text-zinc-500 mb-4">Milisegundos (ms)</p>
+                                <div class="flex items-center gap-4">
+                                    <input type="range" id="queue-interval" min="500" max="10000" step="100" value="3000" class="flex-1">
+                                    <span id="interval-value" class="text-lg font-mono text-orange-400 min-w-[70px]">3000 ms</span>
+                                </div>
+                                <div class="mt-3 text-sm text-zinc-500">
+                                    Mensajes en cola: <span id="queue-size" class="font-bold text-orange-400">0</span>
+                                </div>
+                            </div>
                         </div>
-                        <button onclick="saveResponseDelay()" class="mt-4 w-full py-3 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Guardar Retardo</button>
+                        <div class="config-divider"></div>
+                        <div class="flex justify-end">
+                            <button onclick="saveConfiguracionEnvio()" class="btn-save-config px-8 py-4 rounded-xl font-bold text-white flex items-center gap-2 transition shadow-lg">
+                                <i data-lucide="save" class="w-5 h-5"></i>
+                                Guardar configuración
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1196,12 +1482,24 @@ cat <<'HTMLEOF' > views/index.html
 
     <script>
         const socket = io();
-        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0 }, backupPhone:'', responseDelay:0 };
+        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0 }, backupPhone:'', responseDelay:0, queueInterval:3000, queueSize:0 };
         let currentMediaType = 'text';
         let selectedFiles = [];
         let contacts = [];
         let activePhoneField = null;
         let activeNameField = null;
+
+        // Toast
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            const msgSpan = document.getElementById('toast-message');
+            msgSpan.textContent = message;
+            toast.style.borderLeftColor = isError ? '#ef4444' : '#2563eb';
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
 
         function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); }
 
@@ -1213,15 +1511,21 @@ cat <<'HTMLEOF' > views/index.html
             lucide.createIcons();
         }
 
-        // Reloj en formato 12h con AM/PM
+        // Reloj moderno con fecha
         function updateClock() {
             const now = new Date();
-            const options = { timeZone: 'America/Santo_Domingo', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' };
-            const timeStr = now.toLocaleString('en-US', options) + ' RD';
-            const el1 = document.getElementById('server-clock');
-            const el2 = document.getElementById('rem-clock');
-            if (el1) el1.textContent = '🕐 ' + timeStr;
-            if (el2) el2.textContent = '🕐 ' + timeStr;
+            const optionsTime = { timeZone: 'America/Santo_Domingo', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' };
+            const timeStr = now.toLocaleString('en-US', optionsTime);
+            const optionsDate = { timeZone: 'America/Santo_Domingo', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            const dateStr = now.toLocaleDateString('es-ES', optionsDate);
+            
+            document.getElementById('clock-time').textContent = timeStr;
+            document.getElementById('clock-date').textContent = dateStr;
+            
+            const remTime = document.getElementById('rem-clock-time');
+            const remDate = document.getElementById('rem-clock-date');
+            if (remTime) remTime.textContent = timeStr;
+            if (remDate) remDate.textContent = dateStr;
         }
         setInterval(updateClock, 1000);
         updateClock();
@@ -1240,6 +1544,46 @@ cat <<'HTMLEOF' > views/index.html
             activeNameField = null;
         }
 
+        function getCountryCodeFromNumber(number) {
+            if (!number) return 'unknown';
+            try {
+                const phoneNumber = libphonenumber.parsePhoneNumber(number);
+                if (phoneNumber && phoneNumber.country) {
+                    return phoneNumber.country.toLowerCase();
+                }
+            } catch (e) {
+                const str = number.toString().replace(/\D/g, '');
+                if (str.startsWith('1')) {
+                    if (str.length >= 4) {
+                        const area = str.substring(1, 4);
+                        if (['809', '829', '849'].includes(area)) return 'do';
+                    }
+                    return 'us';
+                }
+                if (str.startsWith('52')) return 'mx';
+                if (str.startsWith('34')) return 'es';
+                if (str.startsWith('54')) return 'ar';
+                if (str.startsWith('55')) return 'br';
+                if (str.startsWith('57')) return 'co';
+                if (str.startsWith('56')) return 'cl';
+                if (str.startsWith('51')) return 'pe';
+                if (str.startsWith('58')) return 've';
+                if (str.startsWith('44')) return 'gb';
+                if (str.startsWith('49')) return 'de';
+                if (str.startsWith('33')) return 'fr';
+                if (str.startsWith('39')) return 'it';
+                if (str.startsWith('7')) return 'ru';
+                if (str.startsWith('86')) return 'cn';
+                if (str.startsWith('81')) return 'jp';
+                if (str.startsWith('82')) return 'kr';
+                if (str.startsWith('91')) return 'in';
+                if (str.startsWith('20')) return 'eg';
+                if (str.startsWith('27')) return 'za';
+                if (str.startsWith('61')) return 'au';
+            }
+            return 'unknown';
+        }
+
         function renderContactList() {
             const search = document.getElementById('contactSearch').value.toLowerCase();
             const filtered = contacts.filter(c => 
@@ -1248,18 +1592,22 @@ cat <<'HTMLEOF' > views/index.html
             );
             const list = document.getElementById('contactList');
             if (filtered.length === 0) {
-                list.innerHTML = '<div class="text-zinc-500 text-center py-4">No se encontraron contactos</div>';
+                list.innerHTML = '<div class="text-zinc-500 text-center py-6">No se encontraron contactos</div>';
                 return;
             }
-            list.innerHTML = filtered.map(c => `
-                <div class="contact-item" onclick="selectContact('${c.number}', '${c.name.replace(/'/g, "\\'")}')">
-                    <i data-lucide="user" class="w-5 h-5 text-blue-400"></i>
-                    <div>
-                        <div class="contact-name">${c.name || 'Sin nombre'}</div>
-                        <div class="contact-number">${c.number}</div>
+            list.innerHTML = filtered.map(c => {
+                const countryCode = getCountryCodeFromNumber(c.number);
+                const flagClass = countryCode !== 'unknown' ? `fi fi-${countryCode}` : 'fi fi-unknown';
+                return `
+                    <div class="contact-item" onclick="selectContact('${c.number}', '${c.name.replace(/'/g, "\\'")}')">
+                        <span class="${flagClass} text-lg"></span>
+                        <div>
+                            <div class="contact-name">${c.name || 'Sin nombre'}</div>
+                            <div class="contact-number">${c.number}</div>
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
             lucide.createIcons();
         }
 
@@ -1278,6 +1626,13 @@ cat <<'HTMLEOF' > views/index.html
         socket.on('contacts_update', data => {
             contacts = data;
             console.log('Contactos actualizados:', contacts.length);
+            if (document.getElementById('contactModal').classList.contains('active')) {
+                renderContactList();
+            }
+        });
+
+        socket.on('queue_size', size => {
+            document.getElementById('queue-size').textContent = size;
         });
 
         function setMediaType(type) {
@@ -1341,8 +1696,8 @@ cat <<'HTMLEOF' > views/index.html
         socket.on('status_update', s => {
             document.getElementById('bot-status').innerText = s;
             document.getElementById('dot').className = s === 'Conectado'
-                ? 'w-2.5 h-2.5 rounded-full bg-green-500'
-                : 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse';
+                ? 'w-3 h-3 rounded-full bg-green-500'
+                : 'w-3 h-3 rounded-full bg-red-500 animate-pulse';
         });
 
         socket.on('connection_status', data => {
@@ -1374,6 +1729,10 @@ cat <<'HTMLEOF' > views/index.html
                 document.getElementById('response-delay').value = cfg.responseDelay;
                 document.getElementById('delay-value').textContent = cfg.responseDelay.toFixed(1) + ' s';
             }
+            if (cfg.queueInterval !== undefined) {
+                document.getElementById('queue-interval').value = cfg.queueInterval;
+                document.getElementById('interval-value').textContent = cfg.queueInterval + ' ms';
+            }
         });
 
         async function load() {
@@ -1388,16 +1747,19 @@ cat <<'HTMLEOF' > views/index.html
                     document.getElementById('connected-container').classList.remove('hidden');
                     document.getElementById('btn-logout-wa').classList.remove('hidden');
                     document.getElementById('bot-status').innerText = 'Conectado';
-                    document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-green-500';
+                    document.getElementById('dot').className = 'w-3 h-3 rounded-full bg-green-500';
                     clearQR();
                 } else {
                     document.getElementById('bot-status').innerText = data.botStatus || 'Desconectado';
-                    document.getElementById('dot').className = 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse';
+                    document.getElementById('dot').className = 'w-3 h-3 rounded-full bg-red-500 animate-pulse';
                 }
 
                 document.getElementById('conf-backup-phone').value = data.backupPhone || '';
                 document.getElementById('response-delay').value = data.responseDelay || 0;
                 document.getElementById('delay-value').textContent = (data.responseDelay || 0).toFixed(1) + ' s';
+                document.getElementById('queue-interval').value = data.queueInterval || 3000;
+                document.getElementById('interval-value').textContent = (data.queueInterval || 3000) + ' ms';
+                document.getElementById('queue-size').textContent = data.queueSize || 0;
                 render();
                 lucide.createIcons();
 
@@ -1446,17 +1808,17 @@ cat <<'HTMLEOF' > views/index.html
 
             const todayRemEl = document.getElementById('today-reminders-list');
             if (todayReminders.length === 0) {
-                todayRemEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">No hay recordatorios para hoy</div>';
+                todayRemEl.innerHTML = '<div class="text-zinc-500 text-sm py-5 text-center">No hay recordatorios para hoy</div>';
             } else {
                 todayRemEl.innerHTML = todayReminders.map(r => `
                     <div class="reminder-item flex justify-between items-center">
                         <div>
-                            <div class="font-medium">${esc(r.name)}</div>
-                            <div class="text-xs text-zinc-500">📱 ${esc(r.phone)}</div>
+                            <div class="font-medium text-base">${esc(r.name)}</div>
+                            <div class="text-xs text-zinc-500 mt-1">📱 ${esc(r.phone)}</div>
                         </div>
                         <div class="text-right">
-                            <div class="text-sm text-emerald-400">${formatReminderDate(r.date)}</div>
-                            <span class="badge bg-blue-500/10 text-blue-400">${r.freq}</span>
+                            <div class="text-sm text-emerald-400 font-mono">${formatReminderDate(r.date)}</div>
+                            <span class="badge bg-blue-500/10 text-blue-400 mt-1">${r.freq}</span>
                         </div>
                     </div>
                 `).join('');
@@ -1465,7 +1827,7 @@ cat <<'HTMLEOF' > views/index.html
             const recentLearn = (db.learning || []).slice(-5).reverse();
             const learnEl = document.getElementById('recent-learning-list');
             if (recentLearn.length === 0) {
-                learnEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">No hay mensajes nuevos</div>';
+                learnEl.innerHTML = '<div class="text-zinc-500 text-sm py-5 text-center">No hay mensajes nuevos</div>';
             } else {
                 learnEl.innerHTML = recentLearn.map(l => `
                     <div class="learning-item">
@@ -1473,27 +1835,27 @@ cat <<'HTMLEOF' > views/index.html
                             <span class="text-xs text-zinc-500">${l.date} · ${l.from}</span>
                             <button onclick="useLFromDashboard('${esc(l.text)}')" class="text-blue-400 hover:text-blue-300 text-xs font-medium">Usar</button>
                         </div>
-                        <p class="text-sm mt-1 break-all">${esc(l.text)}</p>
+                        <p class="text-sm mt-2 break-all">${esc(l.text)}</p>
                     </div>
                 `).join('');
             }
 
             document.getElementById('l-train').innerHTML = (db.training || []).map((t,i) =>
-                '<div class="glass p-4 rounded-2xl"><div class="flex justify-between items-start mb-2 gap-2"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1 flex-wrap"><b class="text-blue-500 text-sm">P:</b><span class="text-sm break-all">'+esc(t.key)+'</span>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded">'+t.mediaPaths.length+' ARCHIVO(S)</span>' : '')+'</div><span class="text-xs sm:text-sm text-zinc-400 break-all">'+esc(t.response)+'</span></div><div class="flex gap-1 flex-shrink-0"><button onclick="editT('+i+')" class="p-2 text-zinc-500 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delT('+i+')" class="p-2 text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<div class="media-preview-container">'+t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? '<img src="/'+p+'" class="media-preview">' : '<video src="/'+p+'" class="media-preview" controls></video>').join('')+'</div>' : '')+'</div>'
+                '<div class="glass p-5 rounded-2xl"><div class="flex justify-between items-start mb-3 gap-2"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1 flex-wrap"><b class="text-blue-500 text-sm">P:</b><span class="text-sm break-all font-medium">'+esc(t.key)+'</span>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded">'+t.mediaPaths.length+' ARCHIVO(S)</span>' : '')+'</div><span class="text-xs sm:text-sm text-zinc-400 break-all">'+esc(t.response)+'</span></div><div class="flex gap-1 flex-shrink-0"><button onclick="editT('+i+')" class="p-2 text-zinc-500 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delT('+i+')" class="p-2 text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<div class="media-preview-container">'+t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? '<img src="/'+p+'" class="media-preview">' : '<video src="/'+p+'" class="media-preview" controls></video>').join('')+'</div>' : '')+'</div>'
             ).join('');
 
             document.getElementById('l-learn').innerHTML = (!db.learning || db.learning.length === 0)
-                ? '<div class="glass p-6 rounded-2xl text-center text-zinc-500">No hay conversaciones nuevas</div>'
+                ? '<div class="glass p-8 rounded-2xl text-center text-zinc-500">No hay conversaciones nuevas</div>'
                 : db.learning.map((l,i) =>
-                    '<div class="glass p-3 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"><div class="min-w-0 flex-1"><small class="text-zinc-500 text-xs">'+l.date+' - '+l.from+'</small><br><b class="text-sm break-all">'+esc(l.text)+'</b>'+(l.hasMedia ? ' <span class="ml-1 text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded">MEDIA</span>' : '')+'</div><div class="flex gap-2 flex-shrink-0"><button onclick="useL('+i+')" class="bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold">Configurar</button><button onclick="delL('+i+')" class="text-red-500 p-2"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>'
+                    '<div class="glass p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"><div class="min-w-0 flex-1"><small class="text-zinc-500 text-xs">'+l.date+' - '+l.from+'</small><br><b class="text-sm break-all">'+esc(l.text)+'</b>'+(l.hasMedia ? ' <span class="ml-1 text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded">MEDIA</span>' : '')+'</div><div class="flex gap-2 flex-shrink-0"><button onclick="useL('+i+')" class="bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition">Configurar</button><button onclick="delL('+i+')" class="text-red-500 p-2"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>'
                 ).join('');
 
             document.getElementById('l-rem').innerHTML = (db.reminders || []).map((r,i) =>
-                '<div class="glass p-4 rounded-2xl border-l-4 border-emerald-500"><div class="flex justify-between items-start mb-2"><b class="text-base">'+esc(r.name)+'</b><div class="flex gap-1"><button onclick="editR('+i+')" class="text-zinc-400 hover:text-white p-1"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delR('+i+')" class="text-red-500 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div><p class="text-xs text-zinc-400 mb-2">📱 '+esc(r.phone)+'</p><p class="text-xs text-zinc-400 mb-2 preserve-whitespace">'+esc(r.message)+'</p><div class="flex flex-wrap gap-2"><span class="text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded">'+r.freq+'</span><span class="text-[10px] font-bold uppercase bg-blue-500/10 text-blue-400 px-2 py-1 rounded">📅 '+formatReminderDate(r.date)+'</span></div></div>'
+                '<div class="glass p-5 rounded-2xl border-l-4 border-emerald-500"><div class="flex justify-between items-start mb-3"><b class="text-lg">'+esc(r.name)+'</b><div class="flex gap-1"><button onclick="editR('+i+')" class="text-zinc-400 hover:text-white p-1"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delR('+i+')" class="text-red-500 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div><p class="text-sm text-zinc-400 mb-2">📱 '+esc(r.phone)+'</p><p class="text-sm text-zinc-400 mb-3 preserve-whitespace">'+esc(r.message)+'</p><div class="flex flex-wrap gap-2"><span class="text-xs font-bold uppercase bg-emerald-500/10 text-emerald-400 px-3 py-1.5 rounded">'+r.freq+'</span><span class="text-xs font-bold uppercase bg-blue-500/10 text-blue-400 px-3 py-1.5 rounded">📅 '+formatReminderDate(r.date)+'</span></div></div>'
             ).join('');
 
             document.getElementById('l-excl').innerHTML = (db.excluded || []).map((e,i) =>
-                '<div class="glass p-3 rounded-xl flex justify-between items-center gap-2"><span class="text-sm break-all">'+esc(e.name)+' ('+esc(e.phone)+')</span><button onclick="delE('+i+')" class="text-red-500 flex-shrink-0 p-1"><i data-lucide="user-minus" class="w-4 h-4"></i></button></div>'
+                '<div class="glass p-4 rounded-xl flex justify-between items-center gap-2"><span class="text-sm break-all">'+esc(e.name)+' ('+esc(e.phone)+')</span><button onclick="delE('+i+')" class="text-red-500 flex-shrink-0 p-2 hover:bg-red-500/10 rounded-lg transition"><i data-lucide="user-minus" class="w-4 h-4"></i></button></div>'
             ).join('');
 
             lucide.createIcons();
@@ -1512,10 +1874,15 @@ cat <<'HTMLEOF' > views/index.html
             fd.append('key', document.getElementById('t-key').value);
             fd.append('response', document.getElementById('t-res').value);
             if (currentMediaType !== 'text' && selectedFiles.length > 0) selectedFiles.forEach(f => fd.append('media', f));
-            await fetch('/api/train', { method:'POST', body: fd });
-            document.getElementById('t-id').value=""; document.getElementById('t-key').value=""; document.getElementById('t-res').value="";
-            document.getElementById('t-media').value=""; document.getElementById('media-preview').innerHTML="";
-            selectedFiles=[]; setMediaType('text'); load();
+            const res = await fetch('/api/train', { method:'POST', body: fd });
+            if (res.ok) {
+                showToast('Respuesta guardada correctamente');
+                document.getElementById('t-id').value=""; document.getElementById('t-key').value=""; document.getElementById('t-res').value="";
+                document.getElementById('t-media').value=""; document.getElementById('media-preview').innerHTML="";
+                selectedFiles=[]; setMediaType('text'); load();
+            } else {
+                showToast('Error al guardar la respuesta', true);
+            }
         }
 
         function editT(i) {
@@ -1525,9 +1892,29 @@ cat <<'HTMLEOF' > views/index.html
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        async function delT(i) { if (confirm('¿Eliminar?')) { await fetch('/api/train/'+i, {method:'DELETE'}); load(); } }
+        async function delT(i) { 
+            if (confirm('¿Eliminar?')) { 
+                const res = await fetch('/api/train/'+i, {method:'DELETE'}); 
+                if (res.ok) {
+                    showToast('Respuesta eliminada');
+                    load(); 
+                } else {
+                    showToast('Error al eliminar', true);
+                }
+            } 
+        }
+
         function useL(i) { document.getElementById('t-key').value = db.learning[i].text; nav('train'); setTimeout(() => document.getElementById('t-res').focus(), 300); }
-        async function delL(i) { await fetch('/api/learning/'+i, {method:'DELETE'}); load(); }
+
+        async function delL(i) { 
+            const res = await fetch('/api/learning/'+i, {method:'DELETE'}); 
+            if (res.ok) {
+                showToast('Mensaje eliminado de la bandeja');
+                load(); 
+            } else {
+                showToast('Error al eliminar', true);
+            }
+        }
 
         async function saveRem() {
             const data = {
@@ -1539,10 +1926,15 @@ cat <<'HTMLEOF' > views/index.html
                 date: document.getElementById('r-date').value
             };
             if (!data.name || !data.phone || !data.message || !data.date) { alert('Completa todos los campos'); return; }
-            await fetch('/api/reminders', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-            document.getElementById('r-id').value=""; document.getElementById('r-name').value="";
-            document.getElementById('r-phone').value=""; document.getElementById('r-msg').value=""; document.getElementById('r-date').value="";
-            load();
+            const res = await fetch('/api/reminders', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+            if (res.ok) {
+                showToast('Recordatorio guardado');
+                document.getElementById('r-id').value=""; document.getElementById('r-name').value="";
+                document.getElementById('r-phone').value=""; document.getElementById('r-msg').value=""; document.getElementById('r-date').value="";
+                load();
+            } else {
+                showToast('Error al guardar recordatorio', true);
+            }
         }
 
         function editR(i) {
@@ -1553,46 +1945,99 @@ cat <<'HTMLEOF' > views/index.html
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        async function delR(i) { if (confirm('¿Eliminar?')) { await fetch('/api/reminders/'+i, {method:'DELETE'}); load(); } }
+        async function delR(i) { 
+            if (confirm('¿Eliminar?')) { 
+                const res = await fetch('/api/reminders/'+i, {method:'DELETE'}); 
+                if (res.ok) {
+                    showToast('Recordatorio eliminado');
+                    load(); 
+                } else {
+                    showToast('Error al eliminar', true);
+                }
+            } 
+        }
 
         async function saveExcl() {
             const name = document.getElementById('e-name').value, phone = document.getElementById('e-phone').value;
             if (!name || !phone) { alert('Completa los campos'); return; }
-            await fetch('/api/exclude', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,phone}) });
-            document.getElementById('e-name').value=""; document.getElementById('e-phone').value=""; load();
+            const res = await fetch('/api/exclude', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,phone}) });
+            if (res.ok) {
+                showToast('Número excluido añadido');
+                document.getElementById('e-name').value=""; document.getElementById('e-phone').value=""; load();
+            } else {
+                showToast('Error al añadir', true);
+            }
         }
 
-        async function delE(i) { if (confirm('¿Eliminar?')) { await fetch('/api/exclude/'+i, {method:'DELETE'}); load(); } }
+        async function delE(i) { 
+            if (confirm('¿Eliminar?')) { 
+                const res = await fetch('/api/exclude/'+i, {method:'DELETE'}); 
+                if (res.ok) {
+                    showToast('Excluido eliminado');
+                    load(); 
+                } else {
+                    showToast('Error al eliminar', true);
+                }
+            } 
+        }
 
         async function saveCredentials() {
             const user = document.getElementById('conf-user').value, pass = document.getElementById('conf-pass').value;
             if (!user && !pass) { alert('Ingresa al menos un campo'); return; }
-            await fetch('/api/config/credentials', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user,pass}) });
-            alert("Credenciales actualizadas. Inicia sesión de nuevo."); location.href='/login';
+            const res = await fetch('/api/config/credentials', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user,pass}) });
+            if (res.ok) {
+                showToast('Credenciales actualizadas. Inicia sesión de nuevo.');
+                setTimeout(() => location.href='/login', 1500);
+            } else {
+                showToast('Error al actualizar', true);
+            }
         }
 
         async function saveBackupPhone() {
             const bp = document.getElementById('conf-backup-phone').value.replace(/\D/g, '');
-            const msg = document.getElementById('phone-saved-msg');
             const res = await fetch('/api/config/backup-phone', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({backupPhone:bp}) });
             const data = await res.json();
-            msg.classList.remove('hidden');
-            if (data.ok) { msg.textContent='✅ Número guardado'; msg.className='text-xs mt-2 text-green-500'; }
-            else { msg.textContent='❌ Error'; msg.className='text-xs mt-2 text-red-500'; }
-            setTimeout(() => msg.classList.add('hidden'), 3000);
+            if (data.ok) { 
+                showToast('Número de backup guardado');
+            } else { 
+                showToast('Error al guardar', true);
+            }
         }
 
-        async function saveResponseDelay() {
+        // Nueva función que guarda ambos valores (retardo e intervalo) con un solo clic
+        async function saveConfiguracionEnvio() {
             const delay = parseFloat(document.getElementById('response-delay').value);
-            await fetch('/api/config/delay', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ delay })
-            });
+            const interval = parseInt(document.getElementById('queue-interval').value);
+
+            try {
+                // Guardar retardo
+                const resDelay = await fetch('/api/config/delay', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ delay })
+                });
+                if (!resDelay.ok) throw new Error('Error al guardar retardo');
+
+                // Guardar intervalo
+                const resInterval = await fetch('/api/config/queue-interval', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ interval })
+                });
+                if (!resInterval.ok) throw new Error('Error al guardar intervalo');
+
+                showToast('Configuración de envío guardada');
+            } catch (e) {
+                showToast(e.message, true);
+            }
         }
 
         document.getElementById('response-delay')?.addEventListener('input', function(e) {
             document.getElementById('delay-value').textContent = parseFloat(e.target.value).toFixed(1) + ' s';
+        });
+
+        document.getElementById('queue-interval')?.addEventListener('input', function(e) {
+            document.getElementById('interval-value').textContent = e.target.value + ' ms';
         });
 
         function downloadBackup() { window.location.href='/api/backup/download'; }
@@ -1605,7 +2050,11 @@ cat <<'HTMLEOF' > views/index.html
             if (!confirm('¿Enviar backup ahora?')) return;
             const res = await fetch('/api/backup/send', {method:'POST'});
             const data = await res.json();
-            alert(data.ok ? '✅ '+data.message : '❌ '+data.message);
+            if (data.ok) {
+                showToast('Backup enviado a WhatsApp');
+            } else {
+                showToast(data.message || 'Error', true);
+            }
         }
 
         async function restoreBackup(input) {
@@ -1614,8 +2063,12 @@ cat <<'HTMLEOF' > views/index.html
             const fd = new FormData(); fd.append('backup', input.files[0]);
             const res = await fetch('/api/backup/restore', {method:'POST', body:fd});
             const data = await res.json();
-            if (data.ok) { alert('✅ Restaurado'); setTimeout(() => location.reload(), 1000); }
-            else alert('❌ Error: '+(data.error||''));
+            if (data.ok) { 
+                showToast('Backup restaurado correctamente');
+                setTimeout(() => location.reload(), 1500); 
+            } else {
+                showToast('Error: '+(data.error||''), true);
+            }
             input.value='';
         }
 
@@ -1624,15 +2077,24 @@ cat <<'HTMLEOF' > views/index.html
             const fd = new FormData(); fd.append('file', input.files[0]);
             const res = await fetch('/api/train/import', {method:'POST', body:fd});
             const data = await res.json();
-            if (data.ok) alert('✅ '+data.imported+' respuestas importadas');
-            else alert('❌ Error: '+(data.error||''));
-            input.value=''; load();
+            if (data.ok) { 
+                showToast(`✅ ${data.imported} respuestas importadas`);
+                load(); 
+            } else {
+                showToast('Error: '+(data.error||''), true);
+            }
+            input.value=''; 
         }
 
         async function logoutWA() {
             if (confirm("¿Desvincular? Los contadores se reiniciarán.")) {
-                await fetch('/api/logout-wa', {method:'POST'});
-                setTimeout(() => location.reload(), 1500);
+                const res = await fetch('/api/logout-wa', {method:'POST'});
+                if (res.ok) {
+                    showToast('WhatsApp desconectado');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showToast('Error al desconectar', true);
+                }
             }
         }
 
@@ -1744,17 +2206,4 @@ echo "🌐 PANEL: https://$DOMAIN"
 echo "👤 USUARIO: $ADMIN_USER"
 echo "🔐 PASS: $ADMIN_PASS"
 echo "🕐 TIMEZONE: America/Santo_Domingo (UTC-4)"
-echo "===================================================="
-echo "🎨 MEJORAS IMPLEMENTADAS:"
-echo "   ✅ Reloj en formato 12h (AM/PM) moderno"
-echo "   ✅ Retardo configurable (0-10s) antes de responder"
-echo "   ✅ Seguridad reforzada (cookies seguras, trust proxy)"
-echo "   ✅ Sincronización de contactos de WhatsApp"
-echo "   ✅ Selector de contactos en recordatorios, excluidos y backup"
-echo "   ✅ Actualización en vivo vía sockets"
-echo "   ✅ Cierre de menú al hacer clic fuera en móvil"
-echo "   ✅ Eliminación automática de mensajes usados de 'Aprender'"
-echo ""
-echo "👉 Visita https://$DOMAIN para acceder al panel."
-echo "   (Espera 30 segundos a que la app termine de iniciar)"
 echo "===================================================="
