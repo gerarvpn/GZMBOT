@@ -1,48 +1,53 @@
-# GZMBOT - WhatsApp Business Automation Platform 🤖
-
-![GZMBOT Panel](https://via.placeholder.com/800x400?text=GZMBOT+Panel+Screenshot)
-
-> **GZMBOT** es una solución empresarial para automatizar conversaciones de WhatsApp con un panel de control moderno, gestión de respuestas automáticas, recordatorios, y copias de seguridad. Diseñado para negocios que buscan eficiencia y profesionalismo en su comunicación.
-
----
-
-## ✨ Características Principales
-
-- **Panel de Control Moderno** – Interfaz elegante y responsiva con modo oscuro.
-- **Conexión Segura con WhatsApp** – Vincula tu número mediante código QR (usando `whatsapp-web.js`).
-- **Gestión de Respuestas Automáticas** – Configura palabras clave y respuestas (texto, imágenes, videos).
-- **Bandeja de Aprendizaje** – Almacena mensajes no reconocidos para entrenar al bot.
-- **Recordatorios Programados** – Envía mensajes automáticos en fechas específicas (único, diario, semanal, mensual, anual).
-- **Cola de Mensajes Inteligente** – Evita bloqueos con intervalos configurables.
-- **Números Excluidos** – Bloquea contactos específicos.
-- **Backups Automáticos** – Copia de seguridad diaria a las 12:00 AM (hora República Dominicana) y envío opcional por WhatsApp.
-- **Configuración en Tiempo Real** – Cambia credenciales, número de backup, retardo de respuestas e intervalo de cola sin reiniciar.
-- **Dominio Personalizado con SSL** – Integración automática con Let's Encrypt.
-- **Monitorización en Vivo** – Estado de conexión, estadísticas de mensajes y tamaño de la cola mediante WebSockets.
+<div align="center">
+  <img src="https://via.placeholder.com/120x120?text=GZMBOT" alt="GZMBOT Logo" width="120"/>
+  <h1>GZMBOT</h1>
+  <p><strong>Plataforma de automatización para WhatsApp Business</strong></p>
+  <p>
+    <a href="#instalación"><img src="https://img.shields.io/badge/Instalación-Una%20línea-blue?style=for-the-badge&logo=linux" alt="Instalación"></a>
+    <a href="#características"><img src="https://img.shields.io/badge/Características-Todas-green?style=for-the-badge&logo=checkmarx" alt="Características"></a>
+    <a href="https://github.com/gerarvpn/GZMBOT"><img src="https://img.shields.io/github/stars/gerarvpn/GZMBOT?style=for-the-badge&logo=github" alt="Stars"></a>
+  </p>
+</div>
 
 ---
 
-## 🖥️ Vista Previa del Panel
+## 🚀 Introducción
 
-![Dashboard](https://via.placeholder.com/800x400?text=Dashboard)
-![Conexión QR](https://via.placeholder.com/800x400?text=QR+Connection)
-![Gestión de Respuestas](https://via.placeholder.com/800x400?text=Training+Section)
+**GZMBOT** es una solución integral para negocios que desean automatizar sus conversaciones de WhatsApp. Con un panel de control moderno, intuitivo y completamente en español, podrás gestionar respuestas automáticas, programar recordatorios, excluir números no deseados y mantener copias de seguridad, todo desde tu navegador.
 
-> *Nota: Reemplaza las imágenes con capturas reales de tu instalación.*
+> 🔒 **Seguro y confiable** – Conexión mediante QR, datos locales, SSL automático con Let's Encrypt.
 
 ---
 
-## 📋 Requisitos Previos
+## ✨ Características Destacadas
 
-- Servidor con **Ubuntu 20.04 / 22.04** (se recomienda un VPS con al menos 2 GB de RAM).
-- **Dominio propio** apuntando al servidor (para SSL).
-- Acceso **root** o usuario con permisos sudo.
+| | | |
+|:---:|:---:|:---:|
+| **Panel Elegante**<br>Interfaz oscura, responsive y fácil de usar. | **Conexión QR**<br>Vincula tu WhatsApp escaneando un código. | **Respuestas Inteligentes**<br>Configura palabras clave con texto o multimedia. |
+| **Aprendizaje Continuo**<br>Almacena mensajes no reconocidos para entrenar. | **Recordatorios Programados**<br>Envía mensajes en fechas y horas específicas. | **Cola de Mensajes**<br>Evita bloqueos con intervalo configurable. |
+| **Backups Automáticos**<br>Copia diaria a las 12:00 AM (hora RD) y envío por WhatsApp. | **Exclusión de Números**<br>Bloquea contactos no deseados. | **Configuración en Vivo**<br>Cambia credenciales, retardos, etc., sin reiniciar. |
 
 ---
 
-## 🚀 Instalación Rápida (Una línea)
+## 🖼️ Capturas de Pantalla
 
-Ejecuta el siguiente comando en tu servidor como **root**:
+<div align="center">
+  <img src="https://via.placeholder.com/400x250?text=Login" alt="Login" width="400"/>
+  <img src="https://via.placeholder.com/400x250?text=Dashboard" alt="Dashboard" width="400"/>
+  <br>
+  <img src="https://via.placeholder.com/400x250?text=Conexión+QR" alt="Conexión QR" width="400"/>
+  <img src="https://via.placeholder.com/400x250?text=Gestión+de+Respuestas" alt="Respuestas" width="400"/>
+  <br>
+  <img src="https://via.placeholder.com/800x300?text=Recordatorios+y+Configuración" alt="Recordatorios"/>
+</div>
+
+> *Reemplaza las imágenes de placeholder con capturas reales de tu instalación.*
+
+---
+
+## 📦 Instalación en un Solo Comando
+
+Ejecuta el siguiente comando en tu servidor **Ubuntu 20.04/22.04** con acceso root:
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/gerarvpn/GZMBOT/main/instalar)
