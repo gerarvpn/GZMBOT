@@ -1,6 +1,8 @@
 #!/bin/bash
 
 # ============================================================
+# GZMBOT - INSTALACIÓN AUTOMATIZADA (VERSIÓN FINAL CORREGIDA)
+# ============================================================
 
 clear
 echo " ⚙️ Iniciando Instalación de GZMBOT"
@@ -119,7 +121,7 @@ cat <<EOF > config.json
 EOF
 
 # ----------------------------------------------------------------------
-# 7. BACKEND (app.js) - CON COLA DE MENSAJES, RETARDO, CONTACTOS, ETC.
+# 7. BACKEND (app.js) - CORREGIDO (SIN SALIR DEL PROCESO AL DESVINCULAR)
 # ----------------------------------------------------------------------
 cat <<'APPEOF' > app.js
 // Forzar timezone del proceso a RD
@@ -257,6 +259,8 @@ console.log('🕐 Timezone configurado:', TZ);
 
 io.on('connection', (socket) => {
     console.log('Cliente conectado al socket');
+    // Enviar estado actual al conectar
+    socket.emit('connection_status', { connected: isConnected, status: botStatus });
     if (lastQRImage) {
         socket.emit('qr_update', lastQRImage);
     }
@@ -327,6 +331,7 @@ function initBot() {
         isConnected = true;
         lastQR = null;
         lastQRImage = null;
+        io.emit('qr_clear'); // Forzar limpieza del QR en el frontend
         io.emit('status_update', botStatus);
         io.emit('connection_status', { connected: true, status: botStatus });
         console.log('✅ Bot conectado -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
@@ -761,24 +766,43 @@ app.post('/api/backup/restore', checkAuth, upload.single('backup'), (req, res) =
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ============ LOGOUT DE WHATSAPP (CORREGIDO: NO SALE DEL PROCESO) ============
 app.post('/api/logout-wa', checkAuth, async (req, res) => {
     try {
-        await client.logout();
+        if (client) {
+            await client.logout();
+            // También podemos destruir la instancia si es necesario
+            try { client.destroy(); } catch (e) {}
+        }
         if (fs.existsSync(AUTH_PATH)) fs.rmSync(AUTH_PATH, { recursive: true, force: true });
+
         isConnected = false;
         botStatus = "Desconectado";
+        lastQR = null;
         lastQRImage = null;
         contacts = [];
+
         const db = getDB();
         db.stats.replied = 0;
         db.stats.total = 0;
         saveDB(db);
+
         io.emit('data_update', db);
+        io.emit('connection_status', { connected: false, status: botStatus });
         io.emit('qr_clear');
         io.emit('contacts_update', []);
+
         res.json({ ok: true });
-        setTimeout(() => process.exit(0), 1000);
-    } catch (e) { res.status(500).send(e.message); }
+
+        // Reiniciar el bot sin salir del proceso
+        setTimeout(() => {
+            // Re-inicializar el cliente
+            initBot();
+        }, 1500);
+    } catch (e) { 
+        console.error('Error en logout:', e);
+        res.status(500).json({ ok: false, error: e.message }); 
+    }
 });
 
 server.listen(config.port, '127.0.0.1', () => {
@@ -789,7 +813,7 @@ server.listen(config.port, '127.0.0.1', () => {
 APPEOF
 
 # ----------------------------------------------------------------------
-# 8. FRONTEND (index.html) - DISEÑO MODERNO Y PROFESIONAL (FONDO AZUL, BOTÓN ÚNICO NARANJA)
+# 8. FRONTEND (index.html) - CORREGIDO CON CONTROL DIRECTO DE DISPLAY
 # ----------------------------------------------------------------------
 cat <<'HTMLEOF' > views/index.html
 <!DOCTYPE html>
@@ -1635,6 +1659,33 @@ cat <<'HTMLEOF' > views/index.html
             document.getElementById('queue-size').textContent = size;
         });
 
+        // Manejador de estado de conexión con control directo de display
+        socket.on('connection_status', data => {
+            console.log('connection_status', data);
+            const qrContainer = document.getElementById('qr-container');
+            const connectedContainer = document.getElementById('connected-container');
+            const logoutBtn = document.getElementById('btn-logout-wa');
+            const botStatusSpan = document.getElementById('bot-status');
+            const dot = document.getElementById('dot');
+
+            if (data.connected) {
+                // Ocultar QR y mostrar conectado
+                qrContainer.style.display = 'none';
+                connectedContainer.style.display = 'block';
+                logoutBtn.style.display = 'block';
+                clearQR(); // Asegurar que el contenido del QR se limpie
+                botStatusSpan.innerText = 'Conectado';
+                dot.className = 'w-3 h-3 rounded-full bg-green-500';
+            } else {
+                // Mostrar QR y ocultar conectado
+                qrContainer.style.display = 'inline-block';
+                connectedContainer.style.display = 'none';
+                logoutBtn.style.display = 'none';
+                botStatusSpan.innerText = data.status || 'Desconectado';
+                dot.className = 'w-3 h-3 rounded-full bg-red-500 animate-pulse';
+            }
+        });
+
         function setMediaType(type) {
             currentMediaType = type;
             document.querySelectorAll('.media-type-btn').forEach(b => b.classList.remove('active'));
@@ -1693,27 +1744,6 @@ cat <<'HTMLEOF' > views/index.html
             }
         }
 
-        socket.on('status_update', s => {
-            document.getElementById('bot-status').innerText = s;
-            document.getElementById('dot').className = s === 'Conectado'
-                ? 'w-3 h-3 rounded-full bg-green-500'
-                : 'w-3 h-3 rounded-full bg-red-500 animate-pulse';
-        });
-
-        socket.on('connection_status', data => {
-            if (data.connected) {
-                document.getElementById('qr-container').classList.add('hidden');
-                document.getElementById('connected-container').classList.remove('hidden');
-                document.getElementById('btn-logout-wa').classList.remove('hidden');
-                clearQR();
-            } else {
-                document.getElementById('qr-container').classList.remove('hidden');
-                document.getElementById('connected-container').classList.add('hidden');
-                document.getElementById('btn-logout-wa').classList.add('hidden');
-            }
-            lucide.createIcons();
-        });
-
         socket.on('qr_update', url => {
             showQR(url);
         });
@@ -1742,16 +1772,26 @@ cat <<'HTMLEOF' > views/index.html
                 const data = await res.json();
                 db = data;
 
+                // Actualizar UI según estado de conexión (usando display directo)
+                const qrContainer = document.getElementById('qr-container');
+                const connectedContainer = document.getElementById('connected-container');
+                const logoutBtn = document.getElementById('btn-logout-wa');
+                const botStatusSpan = document.getElementById('bot-status');
+                const dot = document.getElementById('dot');
+
                 if (data.isConnected) {
-                    document.getElementById('qr-container').classList.add('hidden');
-                    document.getElementById('connected-container').classList.remove('hidden');
-                    document.getElementById('btn-logout-wa').classList.remove('hidden');
-                    document.getElementById('bot-status').innerText = 'Conectado';
-                    document.getElementById('dot').className = 'w-3 h-3 rounded-full bg-green-500';
+                    qrContainer.style.display = 'none';
+                    connectedContainer.style.display = 'block';
+                    logoutBtn.style.display = 'block';
                     clearQR();
+                    botStatusSpan.innerText = 'Conectado';
+                    dot.className = 'w-3 h-3 rounded-full bg-green-500';
                 } else {
-                    document.getElementById('bot-status').innerText = data.botStatus || 'Desconectado';
-                    document.getElementById('dot').className = 'w-3 h-3 rounded-full bg-red-500 animate-pulse';
+                    qrContainer.style.display = 'inline-block';
+                    connectedContainer.style.display = 'none';
+                    logoutBtn.style.display = 'none';
+                    botStatusSpan.innerText = data.botStatus || 'Desconectado';
+                    dot.className = 'w-3 h-3 rounded-full bg-red-500 animate-pulse';
                 }
 
                 document.getElementById('conf-backup-phone').value = data.backupPhone || '';
@@ -2090,10 +2130,11 @@ cat <<'HTMLEOF' > views/index.html
             if (confirm("¿Desvincular? Los contadores se reiniciarán.")) {
                 const res = await fetch('/api/logout-wa', {method:'POST'});
                 if (res.ok) {
-                    showToast('WhatsApp desconectado');
-                    setTimeout(() => location.reload(), 1500);
+                    showToast('WhatsApp desconectado. Recargando...');
+                    setTimeout(() => location.reload(), 3500); // Tiempo suficiente para que el backend reinicie el bot
                 } else {
-                    showToast('Error al desconectar', true);
+                    const err = await res.json();
+                    showToast('Error al desconectar: ' + (err.error || ''), true);
                 }
             }
         }
