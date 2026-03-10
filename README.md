@@ -1,6 +1,6 @@
 # 🤖 GZMBOT
 
-**Automatización inteligente para WhatsApp Business**  
+**Automatización inteligente para WhatsApp**  
 Creado por **gerargzm** · [![Telegram](https://img.shields.io/badge/Telegram-@gerargzm-26A5E4?style=flat&logo=telegram)](https://t.me/gerargzm)  
 [![GitHub stars](https://img.shields.io/github/stars/gerarvpn/GZMBOT?style=social)](https://github.com/gerarvpn/GZMBOT)
 
