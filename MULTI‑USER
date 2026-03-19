@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # ============================================================
-# GZMBOT - INSTALACIÓN AUTOMATIZADA (VERSIÓN ULTRA MODERNA)
+# GZMBOT - INSTALACIÓN AUTOMATIZADA (VERSIÓN FINAL CORREGIDA)
 # ============================================================
 
 clear
-echo " ⚙️ Iniciando Instalación de GZMBOT (edición empresarial)"
+echo " ⚙️ Iniciando Instalación de GZMBOT"
 
 read -p "👤 Usuario Maestro: " ADMIN_USER
 read -sp "🔐 Contraseña Maestra: " ADMIN_PASS
@@ -59,7 +59,6 @@ sudo apt-get install -y \
     libxss1 \
     libxtst6 \
     xdg-utils \
-    ntp systemd-timesyncd \
     --no-install-recommends
 
 # Agregar repositorio de Google Chrome e instalarlo
@@ -93,12 +92,9 @@ curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
 # ----------------------------------------------------------------------
-# 4. CONFIGURAR ZONA HORARIA Y SINCRONIZACIÓN DE HORA
+# 4. CONFIGURAR ZONA HORARIA
 # ----------------------------------------------------------------------
-sudo timedatectl set-timezone America/Santo_Domingo
-sudo timedatectl set-ntp true
-sudo systemctl enable systemd-timesyncd --now
-echo "✅ Hora sincronizada con NTP"
+sudo timedatectl set-timezone America/Santo_Domingo 2>/dev/null || true
 
 # ----------------------------------------------------------------------
 # 5. CREAR ESTRUCTURA DE CARPETAS
@@ -110,7 +106,7 @@ mkdir -p $HOME/gzmbot/backups
 cd $HOME/gzmbot
 
 # ----------------------------------------------------------------------
-# 6. CONFIG.JSON (PUERTO INTERNO 3000 + RETARDO + INTERVALO COLA + NUEVAS OPCIONES)
+# 6. CONFIG.JSON (NUEVOS CAMPOS: disableLearning y autoCleanLearning)
 # ----------------------------------------------------------------------
 cat <<EOF > config.json
 {
@@ -121,16 +117,13 @@ cat <<EOF > config.json
   "backupPhone": "",
   "responseDelay": 0,
   "queueInterval": 3000,
-  "learningEnabled": true,
-  "learningAutoDelete": {
-    "enabled": false,
-    "days": 7
-  }
+  "disableLearning": false,
+  "autoCleanLearning": "never"
 }
 EOF
 
 # ----------------------------------------------------------------------
-# 7. BACKEND (app.js) - SIN CAMBIOS RESPECTO A LA VERSIÓN ANTERIOR
+# 7. BACKEND (app.js) - CORREGIDO Y MEJORADO
 # ----------------------------------------------------------------------
 cat <<'APPEOF' > app.js
 // Forzar timezone del proceso a RD
@@ -385,16 +378,16 @@ function initBot() {
 
     client.on('message', async (msg) => {
         try {
-            if (msg.from === 'status@broadcast') return;
+            if (msg.from === 'status@broadcast') return; // Ignorar estados
 
             const db = getDB();
-            const config = getConfig();
             const phone = msg.from.replace('@c.us', '');
 
             if (db.excluded.some(ex => phone.includes(ex.phone))) return;
 
             const text = msg.body.toLowerCase().trim();
 
+            // Buscar coincidencia en entrenamiento
             const trigger = db.training.find(t => {
                 const key = t.key.toLowerCase().trim();
                 return text.includes(key) || key.includes(text);
@@ -402,6 +395,7 @@ function initBot() {
 
             if (trigger) {
                 // Leer configuración actual (incluye retardo)
+                const config = getConfig();
                 if (config.responseDelay > 0) {
                     await delay(config.responseDelay * 1000);
                 }
@@ -422,15 +416,18 @@ function initBot() {
                     messageQueue.enqueue(msg.from, trigger.response);
                 }
                 db.stats.replied++;
-            } else if (!msg.from.includes('@g.us') && config.learningEnabled) {
-                // Solo almacenar si learningEnabled está activado
-                const msgData = {
-                    text: msg.body, from: phone,
-                    date: nowRD().format('DD/MM HH:mm'),
-                    hasMedia: msg.hasMedia, type: msg.type
-                };
-                if (!db.learning.some(l => l.text === msg.body && l.from === phone)) {
-                    db.learning.push(msgData);
+            } else if (!msg.from.includes('@g.us')) { // Solo chats individuales
+                // --- MEJORA: Solo guardar mensajes de texto si el aprendizaje está activado ---
+                const config = getConfig();
+                if (!config.disableLearning && msg.type === 'chat' && !msg.hasMedia) {
+                    const msgData = {
+                        text: msg.body, from: phone,
+                        date: nowRD().format('DD/MM HH:mm'),
+                        hasMedia: msg.hasMedia, type: msg.type
+                    };
+                    if (!db.learning.some(l => l.text === msg.body && l.from === phone)) {
+                        db.learning.push(msgData);
+                    }
                 }
             }
 
@@ -548,41 +545,44 @@ cron.schedule('* * * * *', () => {
 console.log('⏰ Recordatorios activos - verificando cada minuto en hora RD');
 
 // ============ CRON LIMPIEZA AUTOMÁTICA DE APRENDIZAJE ============
-function cleanOldLearning() {
-    const config = getConfig();
-    if (!config.learningAutoDelete || !config.learningAutoDelete.enabled) return;
-
-    const days = config.learningAutoDelete.days || 7;
-    const db = getDB();
-    const now = moment().tz(TZ);
-    const cutoff = now.subtract(days, 'days');
-
-    const originalLength = db.learning.length;
-    db.learning = db.learning.filter(item => {
-        // item.date formato: "DD/MM HH:mm"
-        const [day, month, time] = item.date.split(/[\/ ]/);
-        const itemDate = moment.tz(`${day}/${month}/${now.year()} ${time}`, 'DD/MM/YYYY HH:mm', TZ);
-        // Si la fecha es del año pasado, ajustar
-        if (itemDate.isAfter(now)) {
-            itemDate.subtract(1, 'year');
+function scheduleLearningCleanup(period) {
+    let cronExpression = '';
+    switch (period) {
+        case '24h': cronExpression = '0 0 * * *'; break;      // cada día a las 00:00
+        case '2d': cronExpression = '0 0 */2 * *'; break;     // cada 2 días
+        case '7d': cronExpression = '0 0 * * 0'; break;       // cada semana (domingo)
+        case '30d': cronExpression = '0 0 1 * *'; break;      // cada mes (día 1)
+        default: return null; // 'never' o no válido
+    }
+    return cron.schedule(cronExpression, () => {
+        const db = getDB();
+        if (db.learning && db.learning.length > 0) {
+            db.learning = [];
+            saveDB(db);
+            io.emit('data_update', db);
+            console.log('🧹 Limpieza automática de aprendizaje ejecutada -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
         }
-        return itemDate.isAfter(cutoff);
+    }, {
+        scheduled: true,
+        timezone: TZ
     });
+}
 
-    if (db.learning.length !== originalLength) {
-        saveDB(db);
-        io.emit('data_update', db);
-        console.log(`🧹 Limpieza automática: se eliminaron ${originalLength - db.learning.length} mensajes antiguos.`);
+let cleanupCron = null;
+function updateCleanupSchedule(period) {
+    if (cleanupCron) {
+        cleanupCron.stop();
+        cleanupCron = null;
+    }
+    if (period !== 'never') {
+        cleanupCron = scheduleLearningCleanup(period);
     }
 }
 
-// Ejecutar limpieza todos los días a las 3:00 AM
-cron.schedule('0 3 * * *', cleanOldLearning, {
-    scheduled: true,
-    timezone: TZ
-});
+// Inicializar según configuración actual
+updateCleanupSchedule(getConfig().autoCleanLearning);
 
-console.log('🧹 Limpieza automática de aprendizaje programada (3:00 AM)');
+// ================================================================
 
 initBot();
 
@@ -600,19 +600,20 @@ app.post('/login', (req, res) => {
 });
 
 app.get('/api/data', checkAuth, (req, res) => {
+    const cfg = getConfig();
     res.json({
         ...getDB(),
         botStatus,
         qr: lastQR,
         isConnected,
-        backupPhone: getConfig().backupPhone || '',
-        responseDelay: getConfig().responseDelay || 0,
-        queueInterval: getConfig().queueInterval || 3000,
+        backupPhone: cfg.backupPhone || '',
+        responseDelay: cfg.responseDelay || 0,
+        queueInterval: cfg.queueInterval || 3000,
+        disableLearning: cfg.disableLearning || false,
+        autoCleanLearning: cfg.autoCleanLearning || 'never',
         queueSize: messageQueue ? messageQueue.size() : 0,
         serverTime: nowRD().format('DD/MM/YYYY HH:mm:ss'),
-        timezone: TZ,
-        learningEnabled: getConfig().learningEnabled,
-        learningAutoDelete: getConfig().learningAutoDelete
+        timezone: TZ
     });
 });
 
@@ -743,6 +744,15 @@ app.delete('/api/learning/:id', checkAuth, (req, res) => {
     saveDB(db); io.emit('data_update', db); res.json({ ok: true });
 });
 
+// Nuevo endpoint para limpiar toda la bandeja de aprendizaje
+app.post('/api/learning/clear-all', checkAuth, (req, res) => {
+    const db = getDB();
+    db.learning = [];
+    saveDB(db);
+    io.emit('data_update', db);
+    res.json({ ok: true });
+});
+
 app.post('/api/config/credentials', checkAuth, (req, res) => {
     const fc = getConfig();
     if (req.body.user) fc.adminUser = req.body.user;
@@ -781,23 +791,22 @@ app.post('/api/config/queue-interval', checkAuth, (req, res) => {
 });
 
 // Endpoint para activar/desactivar aprendizaje
-app.post('/api/config/learning-toggle', checkAuth, (req, res) => {
+app.post('/api/config/disable-learning', checkAuth, (req, res) => {
     const fc = getConfig();
-    fc.learningEnabled = req.body.enabled === true;
+    fc.disableLearning = req.body.disable === true;
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
-    io.emit('config_update', { learningEnabled: fc.learningEnabled });
+    io.emit('config_update', { disableLearning: fc.disableLearning });
     res.json({ ok: true });
 });
 
-// Endpoint para configurar autoeliminación de aprendizaje
-app.post('/api/config/learning-auto-delete', checkAuth, (req, res) => {
+// Endpoint para configurar limpieza automática de aprendizaje
+app.post('/api/config/auto-clean-learning', checkAuth, (req, res) => {
     const fc = getConfig();
-    fc.learningAutoDelete = {
-        enabled: req.body.enabled === true,
-        days: parseInt(req.body.days) || 7
-    };
+    fc.autoCleanLearning = req.body.period || 'never';
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
-    io.emit('config_update', { learningAutoDelete: fc.learningAutoDelete });
+    // Actualizar el cron
+    updateCleanupSchedule(fc.autoCleanLearning);
+    io.emit('config_update', { autoCleanLearning: fc.autoCleanLearning });
     res.json({ ok: true });
 });
 
@@ -836,7 +845,7 @@ app.post('/api/backup/restore', checkAuth, upload.single('backup'), (req, res) =
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// ============ LOGOUT DE WHATSAPP (CORREGIDO: NO SALE DEL PROCESO) ============
+// ============ LOGOUT DE WHATSAPP ============
 app.post('/api/logout-wa', checkAuth, async (req, res) => {
     try {
         if (client) {
@@ -881,7 +890,7 @@ server.listen(config.port, '127.0.0.1', () => {
 APPEOF
 
 # ----------------------------------------------------------------------
-# 8. FRONTEND (index.html) - DISEÑO ULTRA MODERNO
+# 8. FRONTEND (index.html) - MEJORADO CON TOGGLE VERDE ESTILO iOS
 # ----------------------------------------------------------------------
 cat <<'HTMLEOF' > views/index.html
 <!DOCTYPE html>
@@ -899,150 +908,125 @@ cat <<'HTMLEOF' > views/index.html
     <!-- Librería para parsear números de teléfono -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.10.53/libphonenumber-js.min.js"></script>
     <style>
-        /* ===== ESTILOS GLOBALES MODERNOS ===== */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            background: #0c0c10;
-            color: #f0f0f5;
+            background: #0a0a0f;
+            color: #f4f4f5;
             font-family: 'Inter', sans-serif;
-            background-image: 
-                radial-gradient(circle at 20% 30%, rgba(37, 99, 235, 0.08) 0%, transparent 30%),
-                radial-gradient(circle at 80% 70%, rgba(99, 102, 241, 0.06) 0%, transparent 35%);
-            min-height: 100vh;
-            line-height: 1.5;
+            background-image: radial-gradient(circle at 30% 10%, rgba(37, 99, 235, 0.08) 0%, transparent 40%);
         }
         .glass {
-            background: rgba(20, 20, 28, 0.75);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            background: rgba(18, 18, 24, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
             border: 1px solid rgba(255, 255, 255, 0.03);
-            box-shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.6);
+            box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.6);
         }
         .glass-card {
-            background: rgba(26, 26, 34, 0.7);
+            background: rgba(24, 24, 32, 0.6);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.02);
             border-radius: 28px;
-            transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
-            box-shadow: 0 15px 35px -12px rgba(0, 0, 0, 0.5);
+            transition: transform 0.2s ease, border-color 0.2s, box-shadow 0.3s;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
         }
         .glass-card:hover {
-            border-color: rgba(37, 99, 235, 0.3);
-            transform: translateY(-4px);
-            box-shadow: 0 25px 40px -15px #2563eb40;
+            border-color: rgba(37, 99, 235, 0.4);
+            transform: translateY(-3px);
+            box-shadow: 0 15px 35px -10px #2563eb40;
         }
         .sidebar-item {
             display: flex;
             align-items: center;
-            gap: 14px;
-            padding: 14px 18px;
-            border-radius: 18px;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 16px;
             color: #a1a1aa;
             transition: all 0.2s;
             cursor: pointer;
             font-weight: 500;
-            margin-bottom: 6px;
-            border: 1px solid transparent;
+            margin-bottom: 4px;
         }
         .sidebar-item:hover {
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(255, 255, 255, 0.05);
             color: #fff;
-            border-color: rgba(255, 255, 255, 0.02);
         }
         .sidebar-item.active {
             background: linear-gradient(135deg, #2563eb, #1d4ed8);
             color: #fff;
-            box-shadow: 0 8px 20px -4px #2563eb;
-            border-color: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 20px -6px #2563eb;
         }
         .page {
             display: none;
-            animation: fadeSlide 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .page.active {
             display: block;
         }
-        @keyframes fadeSlide {
-            from { opacity: 0; transform: translateY(15px); }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(12px); }
             to { opacity: 1; transform: translateY(0); }
         }
         input, select, textarea {
-            background: rgba(18, 18, 24, 0.8) !important;
-            border: 1px solid #2c2c34 !important;
+            background: #0f0f13 !important;
+            border: 1px solid #27272a !important;
             color: #fff !important;
             padding: 14px 18px !important;
             border-radius: 20px !important;
             outline: none;
             width: 100%;
             font-size: 15px;
-            transition: border 0.2s, box-shadow 0.2s, background 0.2s;
+            transition: border 0.2s, box-shadow 0.2s;
         }
         input:focus, textarea:focus, select:focus {
             border-color: #2563eb !important;
-            background: rgba(24, 24, 32, 0.9) !important;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+        }
+        input[type="datetime-local"] {
+            padding: 12px 16px !important;
+            min-height: auto;
         }
         ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #1a1a24;
+            width: 6px;
         }
         ::-webkit-scrollbar-thumb {
-            background: #3f3f4f;
+            background: #3f3f46;
             border-radius: 10px;
-            border: 2px solid #1a1a24;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #5f5f70;
-        }
-        .stat-card {
-            background: linear-gradient(145deg, rgba(30, 30, 40, 0.8), rgba(22, 22, 30, 0.9));
-            border-radius: 28px;
-            padding: 24px;
-            border: 1px solid rgba(255, 255, 255, 0.02);
-            box-shadow: 0 15px 30px -10px rgba(0, 0, 0, 0.6);
         }
         .stat-value {
-            font-size: 2.8rem;
+            font-size: 2.5rem;
             font-weight: 800;
-            line-height: 1.1;
-            background: linear-gradient(135deg, #ffffff, #a5b4fc);
+            line-height: 1;
+            background: linear-gradient(to right, #e5e7eb, #2563eb);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            filter: drop-shadow(0 4px 8px rgba(37, 99, 235, 0.3));
         }
         .badge {
-            padding: 6px 14px;
+            padding: 4px 12px;
             border-radius: 40px;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.4px;
             text-transform: uppercase;
-            background: rgba(255,255,255,0.02);
+            background: rgba(255,255,255,0.03);
             border: 1px solid rgba(255,255,255,0.05);
-            backdrop-filter: blur(4px);
         }
-        .reminder-item {
-            background: rgba(30, 30, 38, 0.6);
-            border-radius: 24px;
-            padding: 18px;
+        .reminder-item, .learning-item {
+            background: rgba(39, 39, 45, 0.4);
+            border-radius: 20px;
+            padding: 16px;
             border: 1px solid rgba(255,255,255,0.02);
-            margin-bottom: 10px;
-            transition: all 0.2s;
-            backdrop-filter: blur(8px);
+            margin-bottom: 8px;
+            transition: background 0.2s;
         }
-        .reminder-item:hover {
-            background: rgba(38, 38, 48, 0.8);
-            border-color: rgba(37, 99, 235, 0.3);
+        .reminder-item:hover, .learning-item:hover {
+            background: rgba(55, 55, 65, 0.5);
         }
         .aluminum-title {
-            color: #f0f0fa;
+            color: #f0f0f3;
             font-weight: 700;
             letter-spacing: -0.02em;
-            text-shadow: 0 2px 5px rgba(0,0,0,0.3);
         }
         .aluminum-logo {
             background: linear-gradient(135deg, #ffffff, #cbd5e1);
@@ -1066,7 +1050,7 @@ cat <<'HTMLEOF' > views/index.html
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.8);
-            backdrop-filter: blur(12px);
+            backdrop-filter: blur(8px);
             align-items: center;
             justify-content: center;
             z-index: 1000;
@@ -1075,14 +1059,14 @@ cat <<'HTMLEOF' > views/index.html
             display: flex;
         }
         .modal-content {
-            background: #1c1c26;
+            background: #1c1c22;
             border-radius: 40px;
             max-width: 520px;
             width: 90%;
             max-height: 80vh;
             overflow-y: auto;
-            padding: 28px;
-            border: 1px solid #2f2f3a;
+            padding: 24px;
+            border: 1px solid #2f2f37;
             box-shadow: 0 30px 50px -20px black;
         }
         .contact-item {
@@ -1093,19 +1077,28 @@ cat <<'HTMLEOF' > views/index.html
             display: flex;
             align-items: center;
             gap: 14px;
-            border-bottom: 1px solid #2a2a32;
+            border-bottom: 1px solid #2a2a30;
         }
         .contact-item:hover {
-            background: #2a2a36;
+            background: #2a2a32;
         }
         .contact-item.selected {
             background: #2563eb20;
             border-left: 4px solid #2563eb;
         }
-        .contact-name { font-weight: 600; color: #e5e7eb; }
-        .contact-number { font-size: 13px; color: #9ca3af; }
-        .fi { margin-right: 8px; border-radius: 4px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
-
+        .contact-name {
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        .contact-number {
+            font-size: 13px;
+            color: #9ca3af;
+        }
+        .fi {
+            margin-right: 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
         /* Toast */
         .toast {
             position: fixed;
@@ -1153,7 +1146,6 @@ cat <<'HTMLEOF' > views/index.html
             font-weight: 400;
             text-transform: capitalize;
         }
-
         /* QR mejorado */
         #qr-container {
             display: flex;
@@ -1177,12 +1169,10 @@ cat <<'HTMLEOF' > views/index.html
             object-fit: contain;
             border-radius: 16px;
         }
-
         /* Botón de desvincular mejorado */
         #btn-logout-wa {
             transition: all 0.3s ease;
         }
-
         /* Logo del bot moderno */
         .bot-logo {
             background: linear-gradient(145deg, #2563eb, #1e40af);
@@ -1200,7 +1190,6 @@ cat <<'HTMLEOF' > views/index.html
             height: 28px;
             filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
         }
-
         /* Sliders con colores personalizados */
         input[type=range] {
             -webkit-appearance: none;
@@ -1224,25 +1213,19 @@ cat <<'HTMLEOF' > views/index.html
             background: #f97316;
             border: 2px solid #ffffff30;
         }
-
-        /* Tarjetas de configuración */
+        /* Tarjeta unificada de configuración */
         .config-card {
             background: rgba(24, 24, 32, 0.7);
             backdrop-filter: blur(12px);
             border-radius: 28px;
             padding: 28px;
             border: 1px solid rgba(255,255,255,0.03);
-            transition: border-color 0.2s;
-        }
-        .config-card:hover {
-            border-color: #2563eb40;
         }
         .config-divider {
             height: 1px;
             background: rgba(255,255,255,0.05);
             margin: 24px 0;
         }
-
         /* Botón guardar configuración naranja moderno */
         .btn-save-config {
             background: #f97316;
@@ -1257,175 +1240,79 @@ cat <<'HTMLEOF' > views/index.html
         .btn-save-config:active {
             transform: translateY(0);
         }
-
-        /* Switch toggle */
-        .toggle-switch {
+        /* Estilos para recordatorios mejorados */
+        .reminder-card {
+            background: rgba(28, 28, 36, 0.8);
+            border-radius: 24px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.03);
+            transition: all 0.3s;
+            box-shadow: 0 8px 20px -6px rgba(0,0,0,0.5);
+        }
+        .reminder-card:hover {
+            border-color: #10b981;
+            transform: translateY(-2px);
+        }
+        .reminder-icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(16, 185, 129, 0.1);
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #10b981;
+        }
+        .reminder-tag {
+            background: rgba(255,255,255,0.03);
+            border-radius: 40px;
+            padding: 6px 12px;
+            font-size: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        /* Toggle switch estilo iOS (verde) */
+        .switch {
             position: relative;
             display: inline-block;
             width: 52px;
             height: 28px;
         }
-        .toggle-switch input {
+        .switch input {
             opacity: 0;
             width: 0;
             height: 0;
         }
-        .toggle-slider {
+        .slider {
             position: absolute;
             cursor: pointer;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            background-color: #3f3f46;
+            background-color: #3a3a44;
             transition: .3s;
             border-radius: 34px;
         }
-        .toggle-slider:before {
+        .slider:before {
             position: absolute;
             content: "";
-            height: 22px;
-            width: 22px;
-            left: 3px;
-            bottom: 3px;
+            height: 24px;
+            width: 24px;
+            left: 2px;
+            bottom: 2px;
             background-color: white;
             transition: .3s;
             border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
-        input:checked + .toggle-slider {
-            background-color: #2563eb;
+        input:checked + .slider {
+            background-color: #22c55e; /* verde igual que botón descargar backup */
         }
-        input:checked + .toggle-slider:before {
+        input:checked + .slider:before {
             transform: translateX(24px);
-        }
-
-        /* ===== RECORDATORIOS - DISEÑO PREMIUM ===== */
-        .reminder-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-            gap: 24px;
-        }
-        .reminder-card {
-            background: rgba(28, 28, 36, 0.85);
-            backdrop-filter: blur(12px);
-            border-radius: 28px;
-            padding: 24px;
-            border: 1px solid rgba(255,255,255,0.03);
-            transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-            position: relative;
-            overflow: hidden;
-        }
-        .reminder-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 6px;
-            height: 100%;
-            background: #2563eb;
-            transition: width 0.2s;
-        }
-        .reminder-card.freq-diario::before { background: #2563eb; }
-        .reminder-card.freq-semanal::before { background: #10b981; }
-        .reminder-card.freq-mensual::before { background: #8b5cf6; }
-        .reminder-card.freq-anual::before { background: #f59e0b; }
-        .reminder-card.freq-una-vez::before { background: #6b7280; }
-
-        .reminder-card:hover {
-            transform: scale(1.02) translateY(-4px);
-            box-shadow: 0 30px 45px -15px rgba(0,0,0,0.7);
-            border-color: rgba(255,255,255,0.08);
-        }
-        .reminder-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .reminder-name {
-            font-size: 1.3rem;
-            font-weight: 700;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            letter-spacing: -0.3px;
-        }
-        .reminder-name i {
-            color: #2563eb;
-            filter: drop-shadow(0 2px 4px #2563eb40);
-        }
-        .reminder-actions {
-            display: flex;
-            gap: 10px;
-        }
-        .reminder-actions button {
-            background: transparent;
-            border: none;
-            color: #a1a1aa;
-            cursor: pointer;
-            padding: 6px;
-            border-radius: 12px;
-            transition: all 0.2s;
-        }
-        .reminder-actions button:hover {
-            background: rgba(255,255,255,0.08);
-            color: #fff;
-        }
-        .reminder-detail {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            color: #d1d5db;
-            font-size: 0.95rem;
-        }
-        .reminder-detail i {
-            color: #2563eb;
-            width: 18px;
-            opacity: 0.8;
-        }
-        .reminder-message {
-            background: rgba(0,0,0,0.25);
-            border-radius: 20px;
-            padding: 16px;
-            margin: 4px 0;
-            font-size: 0.95rem;
-            border-left: 3px solid #2563eb;
-            color: #e5e7eb;
-            line-height: 1.6;
-            box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
-        }
-        .reminder-badges {
-            display: flex;
-            gap: 12px;
-            margin-top: 8px;
-            flex-wrap: wrap;
-        }
-        .reminder-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(37, 99, 235, 0.12);
-            color: #93c5fd;
-            padding: 6px 14px;
-            border-radius: 40px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            border: 1px solid rgba(37, 99, 235, 0.2);
-            backdrop-filter: blur(4px);
-        }
-        .reminder-badge i {
-            width: 14px;
-        }
-
-        /* Clase para ocultar elementos cuando learning está desactivado */
-        .learning-required {
-            transition: opacity 0.2s;
-        }
-        .learning-required.hidden {
-            display: none !important;
         }
     </style>
 </head>
@@ -1466,7 +1353,8 @@ cat <<'HTMLEOF' > views/index.html
             <div onclick="nav('dash'); if(window.innerWidth<1024) toggleSidebar()" id="n-dash" class="sidebar-item active"><i data-lucide="layout-dashboard" class="w-5 h-5"></i><span>Dashboard</span></div>
             <div onclick="nav('conn'); if(window.innerWidth<1024) toggleSidebar()" id="n-conn" class="sidebar-item"><i data-lucide="qr-code" class="w-5 h-5"></i><span>Conexión</span></div>
             <div onclick="nav('train'); if(window.innerWidth<1024) toggleSidebar()" id="n-train" class="sidebar-item"><i data-lucide="message-square" class="w-5 h-5"></i><span>Respuestas</span></div>
-            <div onclick="nav('learn'); if(window.innerWidth<1024) toggleSidebar()" id="n-learn" class="sidebar-item learning-required"><i data-lucide="brain" class="w-5 h-5"></i><span>Aprender</span></div>
+            <!-- Elemento de aprendizaje, se ocultará dinámicamente si disableLearning = true -->
+            <div onclick="nav('learn'); if(window.innerWidth<1024) toggleSidebar()" id="n-learn" class="sidebar-item" style="display: flex;"><i data-lucide="brain" class="w-5 h-5"></i><span>Aprender</span></div>
             <div onclick="nav('rem'); if(window.innerWidth<1024) toggleSidebar()" id="n-rem" class="sidebar-item"><i data-lucide="bell" class="w-5 h-5"></i><span>Recordatorios</span></div>
             <div onclick="nav('excl'); if(window.innerWidth<1024) toggleSidebar()" id="n-excl" class="sidebar-item"><i data-lucide="shield-off" class="w-5 h-5"></i><span>Excluidos</span></div>
             <div onclick="nav('config'); if(window.innerWidth<1024) toggleSidebar()" id="n-config" class="sidebar-item"><i data-lucide="settings" class="w-5 h-5"></i><span>Ajustes</span></div>
@@ -1502,9 +1390,9 @@ cat <<'HTMLEOF' > views/index.html
                     </div>
                 </div>
 
-                <!-- Tarjetas de estadísticas principales (mismo estilo azul) -->
+                <!-- Tarjetas de estadísticas principales -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-10">
-                    <div class="stat-card flex items-center gap-5">
+                    <div class="glass-card p-7 flex items-center gap-5">
                         <div class="w-16 h-16 rounded-2xl bg-blue-500/20 flex items-center justify-center">
                             <i data-lucide="message-circle" class="w-8 h-8 text-blue-400"></i>
                         </div>
@@ -1513,7 +1401,7 @@ cat <<'HTMLEOF' > views/index.html
                             <h2 id="s-replied" class="stat-value">0</h2>
                         </div>
                     </div>
-                    <div class="stat-card flex items-center gap-5">
+                    <div class="glass-card p-7 flex items-center gap-5">
                         <div class="w-16 h-16 rounded-2xl bg-blue-500/20 flex items-center justify-center">
                             <i data-lucide="users" class="w-8 h-8 text-blue-400"></i>
                         </div>
@@ -1524,7 +1412,7 @@ cat <<'HTMLEOF' > views/index.html
                     </div>
                 </div>
 
-                <!-- Recordatorios de hoy (con iconos) -->
+                <!-- Recordatorios de hoy -->
                 <div class="glass-card p-7 mb-10">
                     <div class="flex items-center gap-3 mb-5">
                         <i data-lucide="bell" class="w-6 h-6 text-emerald-400"></i>
@@ -1539,8 +1427,8 @@ cat <<'HTMLEOF' > views/index.html
                     </button>
                 </div>
 
-                <!-- Últimos mensajes sin respuesta (solo si learning está activado) -->
-                <div id="dashboard-learning-section" class="glass-card p-7 learning-required">
+                <!-- Últimos mensajes sin respuesta - visible solo si aprendizaje activado -->
+                <div id="recent-learning-card" class="glass-card p-7">
                     <div class="flex items-center gap-3 mb-5">
                         <i data-lucide="brain" class="w-6 h-6 text-amber-400"></i>
                         <h3 class="font-semibold text-xl aluminum-title">Últimos mensajes sin respuesta</h3>
@@ -1554,7 +1442,7 @@ cat <<'HTMLEOF' > views/index.html
                 </div>
             </div>
 
-            <!-- ========== CONEXIÓN (QR MEJORADO) ========== -->
+            <!-- ========== CONEXIÓN ========== -->
             <div id="p-conn" class="page">
                 <h2 class="text-3xl font-bold aluminum-title mb-6">Conexión WhatsApp</h2>
                 <div class="max-w-lg mx-auto glass-card p-10 text-center">
@@ -1620,25 +1508,31 @@ cat <<'HTMLEOF' > views/index.html
                 </div>
             </div>
 
-            <!-- ========== APRENDER (visible solo si está activado) ========== -->
-            <div id="p-learn" class="page learning-required">
-                <h2 class="text-3xl font-bold aluminum-title mb-4">Bandeja de Aprendizaje</h2>
-                <p class="text-zinc-400 text-sm mb-5">Conversaciones que el bot no supo responder</p>
+            <!-- ========== APRENDER (MEJORADO) ========== -->
+            <div id="p-learn" class="page">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5">
+                    <h2 class="text-3xl font-bold aluminum-title">Bandeja de Aprendizaje</h2>
+                    <button onclick="clearAllLearning()" class="px-5 py-3 bg-red-600 rounded-xl font-bold flex items-center gap-2 hover:bg-red-700 transition text-sm shadow-lg">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>Limpiar todo
+                    </button>
+                </div>
+                <p class="text-zinc-400 text-sm mb-5">Conversaciones que el bot no supo responder (solo texto)</p>
                 <div id="l-learn" class="space-y-3"></div>
             </div>
 
-            <!-- ========== RECORDATORIOS (DISEÑO PREMIUM) ========== -->
+            <!-- ========== RECORDATORIOS (ESTILO MEJORADO) ========== -->
             <div id="p-rem" class="page">
                 <h2 class="text-3xl font-bold aluminum-title mb-5">Recordatorios</h2>
                 <div class="glass p-6 sm:p-9 rounded-3xl mb-8">
                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-                        <h3 class="font-bold text-xl aluminum-title">Programar Recordatorio</h3>
+                        <h3 class="font-bold text-xl aluminum-title flex items-center gap-2"><i data-lucide="clock" class="w-6 h-6 text-emerald-400"></i> Programar Recordatorio</h3>
+                        <!-- RELOJ DE RECORDATORIOS -->
                         <div class="clock-modern">
                             <div class="clock-time" id="rem-clock-time">--:--:-- --</div>
                             <div class="clock-date" id="rem-clock-date">cargando...</div>
                         </div>
                     </div>
-                    <p class="text-xs text-zinc-500 mb-5">⏰ Hora República Dominicana (UTC-4)</p>
+                    <p class="text-xs text-zinc-500 mb-5 flex items-center gap-1"><i data-lucide="map-pin" class="w-3 h-3"></i> Hora República Dominicana (UTC-4)</p>
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         <input type="hidden" id="r-id">
                         <input type="text" id="r-name" placeholder="Nombre">
@@ -1652,10 +1546,11 @@ cat <<'HTMLEOF' > views/index.html
                         <select id="r-freq"><option>Una vez</option><option>Diario</option><option>Semanal</option><option>Mensual</option><option>Anual</option></select>
                         <input type="datetime-local" id="r-date">
                     </div>
-                    <button onclick="saveRem()" class="mt-6 w-full sm:w-auto px-10 py-4 bg-emerald-600 rounded-2xl font-bold hover:bg-emerald-700 transition shadow-lg">Programar</button>
+                    <button onclick="saveRem()" class="mt-6 w-full sm:w-auto px-10 py-4 bg-emerald-600 rounded-2xl font-bold hover:bg-emerald-700 transition shadow-lg flex items-center justify-center gap-2">
+                        <i data-lucide="send" class="w-4 h-4"></i> Programar
+                    </button>
                 </div>
-                <!-- Lista de recordatorios en formato grid con diseño premium -->
-                <div id="l-rem" class="reminder-grid"></div>
+                <div id="l-rem" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
             </div>
 
             <!-- ========== EXCLUIDOS ========== -->
@@ -1670,13 +1565,15 @@ cat <<'HTMLEOF' > views/index.html
                                 <i data-lucide="users" class="w-5 h-5"></i>
                             </button>
                         </div>
-                        <button onclick="saveExcl()" class="bg-white text-black px-7 py-3.5 font-bold rounded-xl hover:bg-zinc-200 transition whitespace-nowrap">Añadir</button>
+                        <button onclick="saveExcl()" class="bg-white text-black px-7 py-3.5 font-bold rounded-xl hover:bg-zinc-200 transition whitespace-nowrap flex items-center gap-2 justify-center">
+                            <i data-lucide="user-plus" class="w-4 h-4"></i> Añadir
+                        </button>
                     </div>
                     <div id="l-excl" class="mt-7 space-y-2"></div>
                 </div>
             </div>
 
-            <!-- ========== AJUSTES ========== -->
+            <!-- ========== AJUSTES (MEJORADO CON TOGGLE VERDE) ========== -->
             <div id="p-config" class="page">
                 <h2 class="text-3xl font-bold aluminum-title mb-5">Configuración</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-7 max-w-5xl mx-auto">
@@ -1685,13 +1582,15 @@ cat <<'HTMLEOF' > views/index.html
                         <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-6">Credenciales de Acceso</h2>
                         <input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-4">
                         <input type="password" id="conf-pass" placeholder="Nueva Contraseña" class="mb-7">
-                        <button onclick="saveCredentials()" class="w-full py-4 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition shadow-lg">Actualizar</button>
+                        <button onclick="saveCredentials()" class="w-full py-4 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition shadow-lg flex items-center justify-center gap-2">
+                            <i data-lucide="save" class="w-4 h-4"></i> Actualizar
+                        </button>
                     </div>
                     <!-- Backups -->
                     <div class="config-card">
                         <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-5">Copias de Seguridad</h2>
                         <div class="mb-6">
-                            <p class="text-xs sm:text-sm text-zinc-400 mb-2">Número para backups:</p>
+                            <p class="text-xs sm:text-sm text-zinc-400 mb-2 flex items-center gap-1"><i data-lucide="phone" class="w-3 h-3"></i> Número para backups:</p>
                             <div class="flex gap-2">
                                 <div class="flex items-center gap-2 flex-1">
                                     <input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="flex-1">
@@ -1716,13 +1615,12 @@ cat <<'HTMLEOF' > views/index.html
                             </button>
                             <input type="file" id="restore-file" accept=".json" class="hidden" onchange="restoreBackup(this)">
                         </div>
-                        <p class="text-xs text-zinc-500 mt-5">💡 Backup diario 12:00 AM hora RD.</p>
+                        <p class="text-xs text-zinc-500 mt-5 flex items-center gap-1"><i data-lucide="info" class="w-3 h-3"></i> Backup diario 12:00 AM hora RD.</p>
                     </div>
-                    <!-- Tarjeta unificada: Retardo + Intervalo de Cola -->
+                    <!-- Configuración de Envío -->
                     <div class="config-card md:col-span-2">
                         <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-6">Configuración de Envío</h2>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <!-- Retardo -->
                             <div>
                                 <div class="flex items-center gap-2 mb-2">
                                     <i data-lucide="clock" class="w-5 h-5 text-blue-400"></i>
@@ -1734,7 +1632,6 @@ cat <<'HTMLEOF' > views/index.html
                                     <span id="delay-value" class="text-lg font-mono text-blue-400 min-w-[60px]">0.0 s</span>
                                 </div>
                             </div>
-                            <!-- Intervalo de Cola -->
                             <div>
                                 <div class="flex items-center gap-2 mb-2">
                                     <i data-lucide="layers" class="w-5 h-5 text-orange-400"></i>
@@ -1745,8 +1642,8 @@ cat <<'HTMLEOF' > views/index.html
                                     <input type="range" id="queue-interval" min="500" max="10000" step="100" value="3000" class="flex-1">
                                     <span id="interval-value" class="text-lg font-mono text-orange-400 min-w-[70px]">3000 ms</span>
                                 </div>
-                                <div class="mt-3 text-sm text-zinc-500">
-                                    Mensajes en cola: <span id="queue-size" class="font-bold text-orange-400">0</span>
+                                <div class="mt-3 text-sm text-zinc-500 flex items-center gap-1">
+                                    <i data-lucide="list" class="w-3 h-3"></i> Mensajes en cola: <span id="queue-size" class="font-bold text-orange-400">0</span>
                                 </div>
                             </div>
                         </div>
@@ -1758,51 +1655,35 @@ cat <<'HTMLEOF' > views/index.html
                             </button>
                         </div>
                     </div>
-                    <!-- Configuración de Aprendizaje -->
+                    <!-- NUEVA SECCIÓN: Configuración de Aprendizaje con toggle verde -->
                     <div class="config-card md:col-span-2">
-                        <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-6">Configuración de Aprendizaje</h2>
+                        <h2 class="text-xl sm:text-2xl font-bold aluminum-title mb-6 flex items-center gap-2"><i data-lucide="brain" class="w-6 h-6 text-purple-400"></i> Aprendizaje</h2>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                            <!-- Activar/Desactivar aprendizaje -->
                             <div>
-                                <div class="flex items-center justify-between mb-4">
-                                    <div>
-                                        <span class="font-medium text-zinc-300">Recolectar mensajes no respondidos</span>
-                                        <p class="text-xs text-zinc-500">Cuando está activo, los mensajes que el bot no entienda se guardan en la bandeja "Aprender".</p>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="learning-toggle">
-                                        <span class="toggle-slider"></span>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-zinc-300 font-medium">Desactivar aprendizaje</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="disable-learning-toggle">
+                                        <span class="slider"></span>
                                     </label>
                                 </div>
-                                <button onclick="saveLearningToggle()" class="w-full py-3 bg-blue-600 rounded-xl font-bold hover:bg-blue-700 transition text-sm shadow-lg">
-                                    Aplicar cambio
-                                </button>
+                                <p class="text-xs text-zinc-500 mt-2">Si se activa (verde), no se guardarán nuevos mensajes y se ocultará la opción del menú.</p>
                             </div>
-                            <!-- Autoeliminación -->
                             <div>
-                                <div class="flex items-center justify-between mb-4">
-                                    <div>
-                                        <span class="font-medium text-zinc-300">Borrado automático</span>
-                                        <p class="text-xs text-zinc-500">Eliminar mensajes antiguos de la bandeja de aprendizaje.</p>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="auto-delete-toggle">
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="flex gap-2 items-center">
-                                    <select id="auto-delete-days" class="flex-1">
-                                        <option value="1">1 día</option>
-                                        <option value="3">3 días</option>
-                                        <option value="7" selected>7 días</option>
-                                        <option value="15">15 días</option>
-                                        <option value="30">30 días</option>
-                                    </select>
-                                    <button onclick="saveAutoDelete()" class="px-5 py-3 bg-emerald-600 rounded-xl font-bold hover:bg-emerald-700 transition text-sm shadow-lg">
-                                        Guardar
-                                    </button>
-                                </div>
+                                <label class="block text-sm text-zinc-400 mb-2 flex items-center gap-1"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Limpiar mensajes no configurados automáticamente</label>
+                                <select id="auto-clean-learning" class="w-full">
+                                    <option value="never">Nunca</option>
+                                    <option value="24h">Cada 24 horas</option>
+                                    <option value="2d">Cada 2 días</option>
+                                    <option value="7d">Cada 7 días</option>
+                                    <option value="30d">Cada 30 días</option>
+                                </select>
                             </div>
+                        </div>
+                        <div class="flex justify-end mt-6">
+                            <button onclick="saveLearningConfig()" class="bg-green-600 hover:bg-green-700 px-8 py-3 rounded-xl font-bold text-white flex items-center gap-2 transition shadow-lg">
+                                <i data-lucide="save" class="w-4 h-4"></i> Guardar configuración de aprendizaje
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1812,7 +1693,7 @@ cat <<'HTMLEOF' > views/index.html
 
     <script>
         const socket = io();
-        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0 }, backupPhone:'', responseDelay:0, queueInterval:3000, queueSize:0, learningEnabled:true, learningAutoDelete:{ enabled:false, days:7 } };
+        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0 }, backupPhone:'', responseDelay:0, queueInterval:3000, disableLearning:false, autoCleanLearning:'never', queueSize:0 };
         let currentMediaType = 'text';
         let selectedFiles = [];
         let contacts = [];
@@ -1965,25 +1846,6 @@ cat <<'HTMLEOF' > views/index.html
             document.getElementById('queue-size').textContent = size;
         });
 
-        socket.on('config_update', (cfg) => {
-            if (cfg.responseDelay !== undefined) {
-                document.getElementById('response-delay').value = cfg.responseDelay;
-                document.getElementById('delay-value').textContent = cfg.responseDelay.toFixed(1) + ' s';
-            }
-            if (cfg.queueInterval !== undefined) {
-                document.getElementById('queue-interval').value = cfg.queueInterval;
-                document.getElementById('interval-value').textContent = cfg.queueInterval + ' ms';
-            }
-            if (cfg.learningEnabled !== undefined) {
-                document.getElementById('learning-toggle').checked = cfg.learningEnabled;
-                toggleLearningUI(cfg.learningEnabled);
-            }
-            if (cfg.learningAutoDelete !== undefined) {
-                document.getElementById('auto-delete-toggle').checked = cfg.learningAutoDelete.enabled;
-                document.getElementById('auto-delete-days').value = cfg.learningAutoDelete.days;
-            }
-        });
-
         // Manejador de estado de conexión con control directo de display
         socket.on('connection_status', data => {
             console.log('connection_status', data);
@@ -2008,6 +1870,41 @@ cat <<'HTMLEOF' > views/index.html
                 dot.className = 'w-3 h-3 rounded-full bg-red-500 animate-pulse';
             }
         });
+
+        socket.on('config_update', (cfg) => {
+            if (cfg.responseDelay !== undefined) {
+                document.getElementById('response-delay').value = cfg.responseDelay;
+                document.getElementById('delay-value').textContent = cfg.responseDelay.toFixed(1) + ' s';
+            }
+            if (cfg.queueInterval !== undefined) {
+                document.getElementById('queue-interval').value = cfg.queueInterval;
+                document.getElementById('interval-value').textContent = cfg.queueInterval + ' ms';
+            }
+            if (cfg.disableLearning !== undefined) {
+                document.getElementById('disable-learning-toggle').checked = cfg.disableLearning;
+                // Mostrar/ocultar elementos relacionados
+                toggleLearningUI(cfg.disableLearning);
+            }
+            if (cfg.autoCleanLearning !== undefined) {
+                document.getElementById('auto-clean-learning').value = cfg.autoCleanLearning;
+            }
+        });
+
+        function toggleLearningUI(disabled) {
+            const learnMenuItem = document.getElementById('n-learn');
+            const recentLearningCard = document.getElementById('recent-learning-card');
+            if (disabled) {
+                learnMenuItem.style.display = 'none';
+                recentLearningCard.style.display = 'none';
+                // Si estamos en la página de aprendizaje, redirigir a dashboard
+                if (document.getElementById('p-learn').classList.contains('active')) {
+                    nav('dash');
+                }
+            } else {
+                learnMenuItem.style.display = 'flex';
+                recentLearningCard.style.display = 'block';
+            }
+        }
 
         function setMediaType(type) {
             currentMediaType = type;
@@ -2077,20 +1974,6 @@ cat <<'HTMLEOF' > views/index.html
 
         socket.on('data_update', data => { db = data; render(); });
 
-        function toggleLearningUI(enabled) {
-            const elements = document.querySelectorAll('.learning-required');
-            elements.forEach(el => {
-                if (enabled) {
-                    el.classList.remove('hidden');
-                } else {
-                    el.classList.add('hidden');
-                }
-            });
-            if (!enabled && document.getElementById('p-learn').classList.contains('active')) {
-                nav('dash');
-            }
-        }
-
         async function load() {
             try {
                 const res = await fetch('/api/data');
@@ -2098,6 +1981,7 @@ cat <<'HTMLEOF' > views/index.html
                 const data = await res.json();
                 db = data;
 
+                // Actualizar UI según estado de conexión
                 const qrContainer = document.getElementById('qr-container');
                 const connectedContainer = document.getElementById('connected-container');
                 const logoutBtn = document.getElementById('btn-logout-wa');
@@ -2125,17 +2009,18 @@ cat <<'HTMLEOF' > views/index.html
                 document.getElementById('queue-interval').value = data.queueInterval || 3000;
                 document.getElementById('interval-value').textContent = (data.queueInterval || 3000) + ' ms';
                 document.getElementById('queue-size').textContent = data.queueSize || 0;
-                document.getElementById('learning-toggle').checked = data.learningEnabled !== undefined ? data.learningEnabled : true;
-                document.getElementById('auto-delete-toggle').checked = data.learningAutoDelete ? data.learningAutoDelete.enabled : false;
-                document.getElementById('auto-delete-days').value = data.learningAutoDelete ? data.learningAutoDelete.days : 7;
 
-                toggleLearningUI(data.learningEnabled !== false);
+                // Aprendizaje
+                document.getElementById('disable-learning-toggle').checked = data.disableLearning || false;
+                document.getElementById('auto-clean-learning').value = data.autoCleanLearning || 'never';
+                toggleLearningUI(data.disableLearning);
 
                 render();
-                lucide.createIcons();
 
+                // Cargar contactos
                 const contactsRes = await fetch('/api/contacts');
                 contacts = await contactsRes.json();
+                lucide.createIcons();
             } catch(e) { console.error(e); }
         }
 
@@ -2161,16 +2046,6 @@ cat <<'HTMLEOF' > views/index.html
             } catch(e) { return dateStr; }
         }
 
-        function getFreqClass(freq) {
-            switch(freq) {
-                case 'Diario': return 'freq-diario';
-                case 'Semanal': return 'freq-semanal';
-                case 'Mensual': return 'freq-mensual';
-                case 'Anual': return 'freq-anual';
-                default: return 'freq-una-vez';
-            }
-        }
-
         function render() {
             document.getElementById('s-replied').innerText = db.stats ? db.stats.replied : 0;
             document.getElementById('s-total').innerText = db.stats ? db.stats.total : 0;
@@ -2193,97 +2068,70 @@ cat <<'HTMLEOF' > views/index.html
                 todayRemEl.innerHTML = todayReminders.map(r => `
                     <div class="reminder-item flex justify-between items-center">
                         <div>
-                            <div class="font-medium text-base flex items-center gap-2">
-                                <i data-lucide="user" class="w-4 h-4 text-blue-400"></i> ${esc(r.name)}
-                            </div>
-                            <div class="text-xs text-zinc-500 mt-1 flex items-center gap-1">
-                                <i data-lucide="phone" class="w-3 h-3"></i> ${esc(r.phone)}
-                            </div>
+                            <div class="font-medium text-base">${esc(r.name)}</div>
+                            <div class="text-xs text-zinc-500 mt-1 flex items-center gap-1"><i data-lucide="phone" class="w-3 h-3"></i> ${esc(r.phone)}</div>
                         </div>
                         <div class="text-right">
-                            <div class="text-sm text-emerald-400 font-mono flex items-center gap-1">
-                                <i data-lucide="calendar" class="w-3 h-3"></i> ${formatReminderDate(r.date)}
-                            </div>
-                            <span class="badge bg-blue-500/10 text-blue-400 mt-1 flex items-center gap-1 w-fit ml-auto">
-                                <i data-lucide="repeat" class="w-3 h-3"></i> ${r.freq}
-                            </span>
+                            <div class="text-sm text-emerald-400 font-mono flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${formatReminderDate(r.date)}</div>
+                            <span class="badge bg-blue-500/10 text-blue-400 mt-1 flex items-center gap-1"><i data-lucide="repeat" class="w-3 h-3"></i> ${r.freq}</span>
                         </div>
                     </div>
                 `).join('');
             }
 
-            if (db.learningEnabled !== false) {
-                const recentLearn = (db.learning || []).slice(-5).reverse();
-                const learnEl = document.getElementById('recent-learning-list');
-                if (recentLearn.length === 0) {
-                    learnEl.innerHTML = '<div class="text-zinc-500 text-sm py-5 text-center">No hay mensajes nuevos</div>';
-                } else {
-                    learnEl.innerHTML = recentLearn.map(l => `
-                        <div class="learning-item">
-                            <div class="flex justify-between items-start">
-                                <span class="text-xs text-zinc-500 flex items-center gap-1">
-                                    <i data-lucide="clock" class="w-3 h-3"></i> ${l.date} · ${l.from}
-                                </span>
-                                <button onclick="useLFromDashboard('${esc(l.text)}')" class="text-blue-400 hover:text-blue-300 text-xs font-medium">Usar</button>
-                            </div>
-                            <p class="text-sm mt-2 break-all">${esc(l.text)}</p>
+            const recentLearn = (db.learning || []).slice(-5).reverse();
+            const learnEl = document.getElementById('recent-learning-list');
+            if (recentLearn.length === 0) {
+                learnEl.innerHTML = '<div class="text-zinc-500 text-sm py-5 text-center">No hay mensajes nuevos</div>';
+            } else {
+                learnEl.innerHTML = recentLearn.map(l => `
+                    <div class="learning-item">
+                        <div class="flex justify-between items-start">
+                            <span class="text-xs text-zinc-500 flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3"></i> ${l.date} · <i data-lucide="user" class="w-3 h-3"></i> ${l.from}</span>
+                            <button onclick="useLFromDashboard('${esc(l.text)}')" class="text-blue-400 hover:text-blue-300 text-xs font-medium flex items-center gap-1"><i data-lucide="plus-circle" class="w-3 h-3"></i> Usar</button>
                         </div>
-                    `).join('');
-                }
+                        <p class="text-sm mt-2 break-all">${esc(l.text)}</p>
+                    </div>
+                `).join('');
             }
 
             document.getElementById('l-train').innerHTML = (db.training || []).map((t,i) =>
-                '<div class="glass p-5 rounded-2xl"><div class="flex justify-between items-start mb-3 gap-2"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1 flex-wrap"><b class="text-blue-500 text-sm">P:</b><span class="text-sm break-all font-medium">'+esc(t.key)+'</span>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded">'+t.mediaPaths.length+' ARCHIVO(S)</span>' : '')+'</div><span class="text-xs sm:text-sm text-zinc-400 break-all">'+esc(t.response)+'</span></div><div class="flex gap-1 flex-shrink-0"><button onclick="editT('+i+')" class="p-2 text-zinc-500 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delT('+i+')" class="p-2 text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<div class="media-preview-container">'+t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? '<img src="/'+p+'" class="media-preview">' : '<video src="/'+p+'" class="media-preview" controls></video>').join('')+'</div>' : '')+'</div>'
+                '<div class="glass p-5 rounded-2xl"><div class="flex justify-between items-start mb-3 gap-2"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1 flex-wrap"><b class="text-blue-500 text-sm"><i data-lucide="message-circle" class="inline w-3 h-3 mr-1"></i>P:</b><span class="text-sm break-all font-medium">'+esc(t.key)+'</span>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded flex items-center gap-1"><i data-lucide="file" class="w-3 h-3"></i>'+t.mediaPaths.length+' ARCHIVO(S)</span>' : '')+'</div><span class="text-xs sm:text-sm text-zinc-400 break-all flex items-start gap-1"><i data-lucide="corner-down-right" class="w-3 h-3 mt-1 flex-shrink-0"></i> '+esc(t.response)+'</span></div><div class="flex gap-1 flex-shrink-0"><button onclick="editT('+i+')" class="p-2 text-zinc-500 hover:text-white"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delT('+i+')" class="p-2 text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div>'+(t.mediaPaths && t.mediaPaths.length > 0 ? '<div class="media-preview-container">'+t.mediaPaths.map((p, idx) => (t.mediaTypes[idx] && t.mediaTypes[idx].includes('image')) ? '<img src="/'+p+'" class="media-preview">' : '<video src="/'+p+'" class="media-preview" controls></video>').join('')+'</div>' : '')+'</div>'
             ).join('');
 
-            if (db.learningEnabled !== false) {
-                document.getElementById('l-learn').innerHTML = (!db.learning || db.learning.length === 0)
-                    ? '<div class="glass p-8 rounded-2xl text-center text-zinc-500">No hay conversaciones nuevas</div>'
-                    : db.learning.map((l,i) =>
-                        '<div class="glass p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"><div class="min-w-0 flex-1"><small class="text-zinc-500 text-xs flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> '+l.date+' - '+l.from+'</small><br><b class="text-sm break-all">'+esc(l.text)+'</b>'+(l.hasMedia ? ' <span class="ml-1 text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded">MEDIA</span>' : '')+'</div><div class="flex gap-2 flex-shrink-0"><button onclick="useL('+i+')" class="bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition">Configurar</button><button onclick="delL('+i+')" class="text-red-500 p-2"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>'
-                    ).join('');
-            }
+            document.getElementById('l-learn').innerHTML = (!db.learning || db.learning.length === 0)
+                ? '<div class="glass p-8 rounded-2xl text-center text-zinc-500 flex items-center justify-center gap-2"><i data-lucide="inbox" class="w-5 h-5"></i> No hay conversaciones nuevas</div>'
+                : db.learning.map((l,i) =>
+                    '<div class="glass p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"><div class="min-w-0 flex-1"><div class="flex items-center gap-2 text-zinc-500 text-xs mb-1"><i data-lucide="calendar" class="w-3 h-3"></i>'+l.date+' <i data-lucide="user" class="w-3 h-3 ml-1"></i>'+l.from+'</div><b class="text-sm break-all flex items-start gap-1"><i data-lucide="message-square" class="w-3 h-3 mt-0.5 flex-shrink-0"></i> '+esc(l.text)+'</b></div><div class="flex gap-2 flex-shrink-0"><button onclick="useL('+i+')" class="bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition flex items-center gap-1"><i data-lucide="settings" class="w-3 h-3"></i> Configurar</button><button onclick="delL('+i+')" class="text-red-500 p-2 hover:bg-red-500/10 rounded-lg"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>'
+                ).join('');
 
-            // Renderizar recordatorios en formato grid con diseño premium y colores según frecuencia
-            if (db.reminders && db.reminders.length > 0) {
-                document.getElementById('l-rem').innerHTML = db.reminders.map((r,i) => {
-                    const freqClass = getFreqClass(r.freq);
-                    return `
-                    <div class="reminder-card ${freqClass}">
-                        <div class="reminder-header">
-                            <div class="reminder-name">
-                                <i data-lucide="user" class="w-5 h-5 text-blue-400"></i>
-                                ${esc(r.name)}
+            document.getElementById('l-rem').innerHTML = (db.reminders || []).map((r,i) =>
+                `<div class="reminder-card">
+                    <div class="flex items-start gap-4">
+                        <div class="reminder-icon">
+                            <i data-lucide="bell" class="w-5 h-5"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-start">
+                                <h3 class="font-bold text-lg">${esc(r.name)}</h3>
+                                <div class="flex gap-1">
+                                    <button onclick="editR(${i})" class="text-zinc-400 hover:text-white p-1"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+                                    <button onclick="delR(${i})" class="text-red-500 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                </div>
                             </div>
-                            <div class="reminder-actions">
-                                <button onclick="editR(${i})" title="Editar"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
-                                <button onclick="delR(${i})" title="Eliminar"><i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i></button>
+                            <p class="text-sm text-zinc-400 mt-1 flex items-center gap-1"><i data-lucide="phone" class="w-3 h-3"></i> ${esc(r.phone)}</p>
+                            <p class="text-sm text-zinc-300 mt-2 preserve-whitespace flex items-start gap-1"><i data-lucide="message-square" class="w-3 h-3 mt-1 flex-shrink-0"></i> ${esc(r.message)}</p>
+                            <div class="flex flex-wrap gap-2 mt-3">
+                                <span class="reminder-tag"><i data-lucide="repeat" class="w-3 h-3"></i> ${r.freq}</span>
+                                <span class="reminder-tag"><i data-lucide="calendar" class="w-3 h-3"></i> ${formatReminderDate(r.date)}</span>
                             </div>
-                        </div>
-                        <div class="reminder-detail">
-                            <i data-lucide="phone" class="w-4 h-4 text-blue-400"></i>
-                            <span>${esc(r.phone)}</span>
-                        </div>
-                        <div class="reminder-message">
-                            <i data-lucide="message-square" class="w-4 h-4 inline mr-2 text-blue-400" style="vertical-align: middle;"></i>
-                            ${esc(r.message)}
-                        </div>
-                        <div class="reminder-badges">
-                            <span class="reminder-badge">
-                                <i data-lucide="repeat" class="w-3 h-3"></i> ${r.freq}
-                            </span>
-                            <span class="reminder-badge">
-                                <i data-lucide="calendar" class="w-3 h-3"></i> ${formatReminderDate(r.date)}
-                            </span>
                         </div>
                     </div>
-                `}).join('');
-            } else {
-                document.getElementById('l-rem').innerHTML = '<div class="text-zinc-500 text-center py-10">No hay recordatorios programados</div>';
-            }
+                </div>`
+            ).join('');
 
             document.getElementById('l-excl').innerHTML = (db.excluded || []).map((e,i) =>
-                '<div class="glass p-4 rounded-xl flex justify-between items-center gap-2"><span class="text-sm break-all">'+esc(e.name)+' ('+esc(e.phone)+')</span><button onclick="delE('+i+')" class="text-red-500 flex-shrink-0 p-2 hover:bg-red-500/10 rounded-lg transition"><i data-lucide="user-minus" class="w-4 h-4"></i></button></div>'
+                '<div class="glass p-4 rounded-xl flex justify-between items-center gap-2"><span class="text-sm break-all flex items-center gap-2"><i data-lucide="user-x" class="w-4 h-4 text-red-400"></i> '+esc(e.name)+' ('+esc(e.phone)+')</span><button onclick="delE('+i+')" class="text-red-500 flex-shrink-0 p-2 hover:bg-red-500/10 rounded-lg transition"><i data-lucide="user-minus" class="w-4 h-4"></i></button></div>'
             ).join('');
 
             lucide.createIcons();
@@ -2341,6 +2189,18 @@ cat <<'HTMLEOF' > views/index.html
                 load(); 
             } else {
                 showToast('Error al eliminar', true);
+            }
+        }
+
+        // Limpiar toda la bandeja de aprendizaje
+        async function clearAllLearning() {
+            if (!confirm('¿Estás seguro de eliminar TODOS los mensajes de la bandeja de aprendizaje?')) return;
+            const res = await fetch('/api/learning/clear-all', { method:'POST' });
+            if (res.ok) {
+                showToast('Bandeja de aprendizaje limpiada');
+                load();
+            } else {
+                showToast('Error al limpiar', true);
             }
         }
 
@@ -2457,33 +2317,30 @@ cat <<'HTMLEOF' > views/index.html
             }
         }
 
-        async function saveLearningToggle() {
-            const enabled = document.getElementById('learning-toggle').checked;
-            const res = await fetch('/api/config/learning-toggle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled })
-            });
-            if (res.ok) {
-                showToast('Configuración de aprendizaje actualizada');
-                toggleLearningUI(enabled);
-            } else {
-                showToast('Error al guardar', true);
-            }
-        }
+        // Guardar configuración de aprendizaje con toggle verde
+        async function saveLearningConfig() {
+            const disable = document.getElementById('disable-learning-toggle').checked;
+            const period = document.getElementById('auto-clean-learning').value;
 
-        async function saveAutoDelete() {
-            const enabled = document.getElementById('auto-delete-toggle').checked;
-            const days = parseInt(document.getElementById('auto-delete-days').value);
-            const res = await fetch('/api/config/learning-auto-delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled, days })
-            });
-            if (res.ok) {
-                showToast('Configuración de borrado automático guardada');
-            } else {
-                showToast('Error al guardar', true);
+            try {
+                const res1 = await fetch('/api/config/disable-learning', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ disable })
+                });
+                if (!res1.ok) throw new Error('Error al guardar estado de aprendizaje');
+
+                const res2 = await fetch('/api/config/auto-clean-learning', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ period })
+                });
+                if (!res2.ok) throw new Error('Error al guardar período de limpieza');
+
+                showToast('Configuración de aprendizaje guardada');
+                toggleLearningUI(disable);
+            } catch (e) {
+                showToast(e.message, true);
             }
         }
 
