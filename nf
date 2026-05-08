@@ -1,0 +1,1684 @@
+#!/bin/bash
+
+# ============================================================
+# GZMBOT - INSTALACIÓN AUTOMATIZADA (NETFLIX HOGAR FINAL)
+# VERSIÓN CON DETECCIÓN INMEDIATA DE CORREOS (IMAP IDLE)
+# ============================================================
+
+clear
+echo " ⚙️ Iniciando Instalación de GZMBOT (Netflix Hogar - Detección instantánea)"
+
+# Función para detectar OS
+detect_os() {
+    if [ -f /etc/debian_version ]; then
+        echo "debian"
+    else
+        echo "unknown"
+    fi
+}
+
+OS=$(detect_os)
+if [ "$OS" != "debian" ]; then
+    echo "⚠️  Este script está diseñado para Debian/Ubuntu. Asumiendo compatibilidad..."
+fi
+
+# Solicitar datos
+read -p "👤 Usuario Maestro: " ADMIN_USER
+read -sp "🔐 Contraseña Maestra: " ADMIN_PASS
+echo ""
+read -p "🌐 Dominio para el panel (ej: bot.midominio.com): " DOMAIN
+
+if [ -z "$DOMAIN" ]; then
+    echo "❌ Debes ingresar un dominio válido."
+    exit 1
+fi
+
+# ----------------------------------------------------------------------
+# 1. ACTUALIZAR SISTEMA E INSTALAR DEPENDENCIAS BÁSICAS
+# ----------------------------------------------------------------------
+echo "🔄 Actualizando repositorios..."
+sudo apt-get update -y
+sudo apt-get upgrade -y
+
+echo "📦 Instalando dependencias esenciales..."
+sudo apt-get install -y --fix-missing \
+    curl wget gnupg2 \
+    ca-certificates \
+    software-properties-common \
+    apt-transport-https \
+    lsb-release \
+    --no-install-recommends
+
+# ----------------------------------------------------------------------
+# 2. INSTALAR DEPENDENCIAS DEL SISTEMA PARA CHROME Y PUPPETEER
+# ----------------------------------------------------------------------
+echo "📦 Instalando dependencias del sistema..."
+sudo apt-get install -y --fix-missing \
+    fonts-liberation \
+    libappindicator3-1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libgcc-s1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    xdg-utils \
+    --no-install-recommends
+
+# ----------------------------------------------------------------------
+# 3. INSTALAR GOOGLE CHROME
+# ----------------------------------------------------------------------
+echo "🌐 Instalando Google Chrome..."
+CHROME_INSTALLED=0
+
+if ! command -v google-chrome-stable &> /dev/null; then
+    echo "➡️ Configurando repositorio oficial de Chrome..."
+    sudo mkdir -p /etc/apt/keyrings
+    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+    sudo apt-get update -y
+    if sudo apt-get install -y google-chrome-stable; then
+        CHROME_INSTALLED=1
+    else
+        echo "⚠️ Falló instalación desde repositorio. Se usará descarga directa."
+    fi
+fi
+
+if [ $CHROME_INSTALLED -eq 0 ] && ! command -v google-chrome-stable &> /dev/null; then
+    echo "➡️ Descargando Google Chrome .deb..."
+    wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    if sudo dpkg -i /tmp/chrome.deb 2>/dev/null; then
+        CHROME_INSTALLED=1
+    else
+        echo "⚠️ Resolviendo dependencias faltantes..."
+        sudo apt-get install -f -y
+        sudo dpkg -i /tmp/chrome.deb && CHROME_INSTALLED=1
+    fi
+    rm -f /tmp/chrome.deb
+fi
+
+if ! command -v google-chrome-stable &> /dev/null; then
+    echo "❌ Error: No se pudo instalar Google Chrome."
+    exit 1
+fi
+echo "✅ Google Chrome instalado: $(google-chrome-stable --version)"
+
+sudo ldconfig
+
+# ----------------------------------------------------------------------
+# 4. VARIABLES DE ENTORNO
+# ----------------------------------------------------------------------
+export PUPPETEER_EXECUTABLE_PATH=$(which google-chrome-stable)
+export PUPPETEER_SKIP_DOWNLOAD=true
+export TZ='America/Santo_Domingo'
+
+# ----------------------------------------------------------------------
+# 5. NODE.JS 18
+# ----------------------------------------------------------------------
+echo "🟢 Instalando Node.js 18..."
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# ----------------------------------------------------------------------
+# 6. ZONA HORARIA
+# ----------------------------------------------------------------------
+sudo timedatectl set-timezone America/Santo_Domingo 2>/dev/null || true
+
+# ----------------------------------------------------------------------
+# 7. CREAR ESTRUCTURA DE CARPETAS
+# ----------------------------------------------------------------------
+mkdir -p $HOME/gzmbot/views
+mkdir -p $HOME/gzmbot/data
+mkdir -p $HOME/gzmbot/media
+mkdir -p $HOME/gzmbot/backups
+cd $HOME/gzmbot
+
+# ----------------------------------------------------------------------
+# 8. CONFIG.JSON (estructura multicuenta con backup completo)
+# ----------------------------------------------------------------------
+cat <<EOF > config.json
+{
+  "adminUser": "$ADMIN_USER",
+  "adminPassword": "$ADMIN_PASS",
+  "port": 3000,
+  "sessionSecret": "$(openssl rand -hex 24)",
+  "backupPhone": "",
+  "responseDelay": 0,
+  "queueInterval": 3000,
+  "disableLearning": false,
+  "autoCleanLearning": "never",
+  "netflix": {
+    "accounts": []
+  }
+}
+EOF
+
+# ----------------------------------------------------------------------
+# 9. ARCHIVOS DE DATOS
+# ----------------------------------------------------------------------
+echo '[]' > data/netflix_logs.json
+echo '[]' > data/netflix_processed.json
+
+# ----------------------------------------------------------------------
+# 10. MOTOR NETFLIX (netflix-engine.js) - CON IMAP IDLE Y PROCESAMIENTO INSTANTÁNEO
+# ----------------------------------------------------------------------
+cat <<'NETFLIXEOF' > netflix-engine.js
+const fs = require('fs');
+const path = require('path');
+const { ImapFlow } = require('imapflow');
+const { simpleParser } = require('mailparser');
+const puppeteer = require('puppeteer');
+
+const LOGS_FILE = path.join(__dirname, 'data', 'netflix_logs.json');
+const PROCESSED_FILE = path.join(__dirname, 'data', 'netflix_processed.json');
+const CONFIG_PATH = path.join(__dirname, 'config.json');
+const USER_DATA_DIR_BASE = path.join(__dirname, '.puppeteer_data');
+
+function getConfig() {
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+}
+
+function getLogs() {
+    try { return JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8')); } catch (e) { return []; }
+}
+
+function saveLogs(logs) {
+    const trimmed = logs.slice(0, 200);
+    fs.writeFileSync(LOGS_FILE, JSON.stringify(trimmed, null, 2));
+}
+
+function getProcessed() {
+    try { return JSON.parse(fs.readFileSync(PROCESSED_FILE, 'utf8')); } catch (e) { return []; }
+}
+
+function saveProcessed(processed) {
+    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+    const fresh = processed.filter(p => p.timestamp > cutoff);
+    fs.writeFileSync(PROCESSED_FILE, JSON.stringify(fresh, null, 2));
+}
+
+class NetflixEngine {
+    constructor(io, messageQueue) {
+        this.io = io;
+        this.messageQueue = messageQueue;
+        this.idleClients = new Map(); // account email -> client
+        this.config = getConfig().netflix || { accounts: [] };
+        if (!fs.existsSync(USER_DATA_DIR_BASE)) fs.mkdirSync(USER_DATA_DIR_BASE, { recursive: true });
+    }
+
+    async #autoUpdateHousehold(link, accountEmail) {
+        let browser = null;
+        const result = {
+            success: false,
+            finalMessage: 'No se inició el proceso',
+            steps: []
+        };
+        const logStep = (msg) => {
+            console.log(`[Netflix-${accountEmail}] ${msg}`);
+            result.steps.push(msg);
+        };
+
+        const userDataDir = path.join(USER_DATA_DIR_BASE, Buffer.from(accountEmail).toString('base64').replace(/[^a-z0-9]/gi, '_'));
+        if (!fs.existsSync(userDataDir)) fs.mkdirSync(userDataDir, { recursive: true });
+
+        try {
+            logStep(`Iniciando navegador para actualizar hogar...`);
+            browser = await puppeteer.launch({
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+                headless: 'new',
+                userDataDir: userDataDir,
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--window-size=1280,800'],
+                defaultViewport: { width: 1280, height: 800 }
+            });
+
+            const page = await browser.newPage();
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+            logStep(`Cargando enlace: ${link}`);
+            await page.goto(link, { waitUntil: 'networkidle2', timeout: 30000 });
+            await page.waitForTimeout(3000);
+
+            const currentUrl = page.url();
+            if (currentUrl.includes('login') || currentUrl.includes('signin')) {
+                logStep(`⚠️ Página de login detectada. Se requiere sesión previa en el perfil de Chrome.`);
+                result.success = false;
+                result.finalMessage = 'Redirigido a login - inicia sesión manualmente una vez en el navegador del servidor.';
+                await browser.close();
+                return result;
+            }
+
+            const buttonTexts = [
+                'actualizar hogar', 'confirmar', 'continuar', 'sí, actualizar',
+                'update household', 'confirm', 'continue', 'yes, update',
+                'actualizar', 'update', 'aceptar', 'accept', 'verificar'
+            ];
+
+            let clickCount = 0;
+            let finished = false;
+
+            while (clickCount < 5 && !finished) {
+                let clicked = false;
+                for (const text of buttonTexts) {
+                    try {
+                        const buttons = await page.$x(`//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${text}')] | //a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${text}')]`);
+                        if (buttons.length > 0) {
+                            const btn = buttons[0];
+                            const isVisible = await btn.isIntersectingViewport();
+                            if (isVisible) {
+                                logStep(`Haciendo clic en: "${text}"`);
+                                await btn.click();
+                                clicked = true;
+                                clickCount++;
+                                await page.waitForTimeout(4000);
+                                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
+                                break;
+                            }
+                        }
+                    } catch (err) {}
+                }
+                if (!clicked) {
+                    const content = await page.content();
+                    const successKeywords = ['hogar actualizado', 'household updated', 'todo listo', 'ya está actualizado', 'update successful'];
+                    if (successKeywords.some(kw => content.toLowerCase().includes(kw))) {
+                        finished = true;
+                        result.success = true;
+                        result.finalMessage = 'Hogar actualizado correctamente';
+                        logStep(`✅ ${result.finalMessage}`);
+                    } else {
+                        logStep(`No se encontraron más botones. Proceso finalizado.`);
+                        result.success = true;
+                        result.finalMessage = 'Proceso completado sin más interacción';
+                        finished = true;
+                    }
+                }
+            }
+
+            await browser.close();
+            return result;
+        } catch (err) {
+            logStep(`❌ Error: ${err.message}`);
+            if (browser) await browser.close().catch(()=>{});
+            result.success = false;
+            result.finalMessage = `Error: ${err.message}`;
+            return result;
+        }
+    }
+
+    extractNetflixData(parsed) {
+        const text = (parsed.text || '') + ' ' + (parsed.html || '');
+        let code = null;
+        let link = null;
+
+        // Buscar código de 4 o 6 dígitos
+        const codeMatch = text.match(/\b(\d{4,6})\b/);
+        if (codeMatch) code = codeMatch[1];
+
+        const html = parsed.html || '';
+        const linkRegex = /<a\s+(?:[^>]*?\s+)?href="(https:\/\/www\.netflix\.com\/account\/verify\?[^"]+)"/i;
+        const linkMatch = html.match(linkRegex);
+        if (linkMatch) link = linkMatch[1];
+        else {
+            const textLinkMatch = text.match(/(https:\/\/www\.netflix\.com\/account\/verify\?\S+)/i);
+            if (textLinkMatch) link = textLinkMatch[1];
+        }
+
+        const subject = (parsed.subject || '').toLowerCase();
+        const isAccountVerification = subject.includes('verificación de seguridad') ||
+                                      subject.includes('account verification') ||
+                                      subject.includes('código de verificación');
+
+        return { code, link, isAccountVerification };
+    }
+
+    async processEmail(parsed, uid, messageId, account) {
+        const { code, link, isAccountVerification } = this.extractNetflixData(parsed);
+        const from = parsed.from ? parsed.from.text : 'Desconocido';
+        const subject = parsed.subject || 'Sin asunto';
+
+        if (!code && !link) return null;
+
+        const logEntry = {
+            id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+            timestamp: new Date().toISOString(),
+            account: account.email,
+            from,
+            subject,
+            code: code || null,
+            link: link || null,
+            isAccountVerification,
+            viewed: false,
+            viewedAt: null,
+            codeSentTo: [],
+            linkInteraction: null
+        };
+
+        // Procesar código (si existe)
+        const groupPhone = account.groupPhone?.trim();
+        if (groupPhone && code) {
+            const groupChatId = groupPhone.includes('@') ? groupPhone : groupPhone + '@g.us';
+            const canSend = !isAccountVerification || account.sendVerificationCodesToGroup;
+            if (canSend && this.messageQueue) {
+                this.messageQueue.enqueue(groupChatId, `🔑 Código de verificación: *${code}*`);
+                logEntry.codeSentTo.push('group');
+            }
+        }
+
+        // Procesar enlace (actualización de hogar) si existe
+        if (link) {
+            const autoResult = await this.#autoUpdateHousehold(link, account.email);
+            logEntry.linkInteraction = {
+                success: autoResult.success,
+                finalMessage: autoResult.finalMessage,
+                steps: autoResult.steps
+            };
+        }
+
+        return logEntry;
+    }
+
+    async startIdleForAccount(account) {
+        if (this.idleClients.has(account.email)) return;
+
+        const client = new ImapFlow({
+            host: 'imap.gmail.com',
+            port: 993,
+            secure: true,
+            auth: { user: account.email, pass: account.password },
+            logger: false
+        });
+
+        try {
+            await client.connect();
+            console.log(`📧 Conectado a IMAP para ${account.email}`);
+
+            const lock = await client.getMailboxLock('INBOX');
+            try {
+                // Marcar correos no leídos como vistos inicialmente (para no procesar antiguos)
+                const unseen = await client.search({ seen: false });
+                for (const uid of unseen) {
+                    await client.messageFlagsAdd(uid, ['\\Seen']);
+                }
+            } finally {
+                lock.release();
+            }
+
+            // Escuchar nuevos correos en tiempo real
+            client.on('mail', async (info) => {
+                console.log(`📨 Nuevo correo detectado para ${account.email}, uid: ${info.uid}`);
+                try {
+                    const msg = await client.fetchOne(info.uid, { source: true, envelope: true });
+                    const parsed = await simpleParser(msg.source);
+                    const processed = getProcessed();
+                    const mid = parsed.messageId || info.uid;
+                    if (processed.some(p => p.messageId === mid)) return;
+
+                    const from = (parsed.from && parsed.from.text) || '';
+                    const subject = (parsed.subject || '').toLowerCase();
+                    const isNetflix = from.includes('netflix.com') ||
+                                      subject.includes('netflix') ||
+                                      subject.includes('hogar') ||
+                                      subject.includes('verificación') ||
+                                      subject.includes('código');
+                    if (!isNetflix) return;
+
+                    const logEntry = await this.processEmail(parsed, info.uid, mid, account);
+                    if (logEntry) {
+                        const currentLogs = getLogs();
+                        saveLogs([logEntry, ...currentLogs]);
+                        const unviewed = getLogs().filter(l => !l.viewed);
+                        if (this.io) this.io.emit('netflix_update', { logs: unviewed });
+                        saveProcessed([...processed, { messageId: mid, uid: info.uid, timestamp: Date.now() }]);
+                    }
+                    await client.messageFlagsAdd(info.uid, ['\\Seen']);
+                } catch (err) {
+                    console.error(`Error procesando correo ${info.uid} de ${account.email}:`, err.message);
+                }
+            });
+
+            // Iniciar IDLE (escucha continua)
+            await client.idle();
+            this.idleClients.set(account.email, client);
+            console.log(`✅ IDLE activado para ${account.email}`);
+        } catch (err) {
+            console.error(`❌ Error iniciando IDLE para ${account.email}:`, err.message);
+            setTimeout(() => this.startIdleForAccount(account), 30000);
+        }
+    }
+
+    startAllIdle() {
+        const cfg = getConfig();
+        const accounts = cfg.netflix?.accounts || [];
+        for (const account of accounts) {
+            if (account.email && account.password) {
+                this.startIdleForAccount(account);
+            }
+        }
+    }
+
+    stopAllIdle() {
+        for (const [email, client] of this.idleClients.entries()) {
+            try { client.logout(); } catch(e) {}
+            this.idleClients.delete(email);
+        }
+    }
+
+    getUnviewedLogs() {
+        return getLogs().filter(l => !l.viewed);
+    }
+
+    markLogAsViewed(logId) {
+        const logs = getLogs();
+        const log = logs.find(l => l.id === logId);
+        if (log) {
+            log.viewed = true;
+            log.viewedAt = Date.now();
+            saveLogs(logs);
+            return true;
+        }
+        return false;
+    }
+
+    deleteLog(logId) {
+        let logs = getLogs();
+        logs = logs.filter(l => l.id !== logId);
+        saveLogs(logs);
+    }
+
+    cleanupExpiredViewedLogs() {
+        const logs = getLogs();
+        const now = Date.now();
+        const freshLogs = logs.filter(l => !l.viewed || (l.viewedAt && now - l.viewedAt <= 10 * 60 * 1000));
+        if (freshLogs.length < logs.length) saveLogs(freshLogs);
+    }
+
+    cleanupOldLogs() {
+        const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+        const logs = getLogs().filter(l => new Date(l.timestamp).getTime() > cutoff);
+        saveLogs(logs);
+    }
+}
+
+module.exports = NetflixEngine;
+NETFLIXEOF
+
+# ----------------------------------------------------------------------
+# 11. BACKEND (app.js) - CON NETFLIX ENGINE ACTUALIZADO
+# ----------------------------------------------------------------------
+cat <<'APPEOF' > app.js
+process.env.TZ = 'America/Santo_Domingo';
+
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const session = require('express-session');
+const fs = require('fs');
+const path = require('path');
+const cron = require('node-cron');
+const moment = require('moment-timezone');
+const multer = require('multer');
+const NetflixEngine = require('./netflix-engine');
+
+const TZ = 'America/Santo_Domingo';
+const app = express();
+app.set('trust proxy', 1);
+
+const server = http.createServer(app);
+const io = socketIo(server);
+
+const DB_PATH = path.join(__dirname, 'data/database.json');
+const CONFIG_PATH = path.join(__dirname, 'config.json');
+const MEDIA_PATH = path.join(__dirname, 'media');
+const BACKUP_PATH = path.join(__dirname, 'backups');
+const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
+
+if (!fs.existsSync(DB_PATH)) {
+    fs.writeFileSync(DB_PATH, JSON.stringify({
+        training: [], reminders: [], excluded: [], learning: [],
+        stats: { replied: 0, total: 0 }
+    }));
+}
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, file.fieldname === 'backup' ? BACKUP_PATH : MEDIA_PATH);
+    },
+    filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
+});
+const upload = multer({ storage });
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use('/media', express.static(MEDIA_PATH));
+
+const getConfig = () => JSON.parse(fs.readFileSync(CONFIG_PATH));
+let config = getConfig();
+let netflixEngine = null;
+
+app.use(session({
+    secret: config.sessionSecret,
+    resave: false,
+    saveUninitialized: true,
+    cookie: {
+        maxAge: 86400000,
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax'
+    }
+}));
+
+const getDB = () => JSON.parse(fs.readFileSync(DB_PATH));
+const saveDB = (data) => fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+
+function nowRD() {
+    return moment().tz(TZ);
+}
+
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+class MessageQueue {
+    constructor(intervalMs = 3000) {
+        this.queue = [];
+        this.intervalMs = intervalMs;
+        this.processing = false;
+    }
+
+    enqueue(chatId, message, options = {}) {
+        this.queue.push({ chatId, message, options });
+        this.process();
+    }
+
+    async process() {
+        if (this.processing || this.queue.length === 0) return;
+        this.processing = true;
+
+        while (this.queue.length > 0) {
+            const { chatId, message, options } = this.queue.shift();
+            try {
+                if (typeof message === 'string') {
+                    await client.sendMessage(chatId, message, options);
+                } else {
+                    await client.sendMessage(chatId, message, options);
+                }
+                console.log(`📨 Mensaje enviado a ${chatId} - ${nowRD().format('HH:mm:ss')}`);
+            } catch (error) {
+                console.error(`❌ Error enviando mensaje a ${chatId}:`, error.message);
+            }
+            await new Promise(resolve => setTimeout(resolve, this.intervalMs));
+        }
+
+        this.processing = false;
+    }
+
+    setInterval(ms) {
+        this.intervalMs = ms;
+    }
+
+    size() {
+        return this.queue.length;
+    }
+}
+
+let client;
+let botStatus = "Desconectado";
+let lastQR = null;
+let lastQRImage = null;
+let isConnected = false;
+let contacts = [];
+let messageQueue;
+
+console.log('🕐 Hora del servidor:', new Date().toString());
+console.log('🕐 Hora RD (moment):', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+
+io.on('connection', (socket) => {
+    console.log('Cliente conectado al socket');
+    socket.emit('connection_status', { connected: isConnected, status: botStatus });
+    if (lastQRImage) socket.emit('qr_update', lastQRImage);
+    socket.emit('contacts_update', contacts);
+    setInterval(() => {
+        if (messageQueue) socket.emit('queue_size', messageQueue.size());
+    }, 2000);
+    if (netflixEngine) socket.emit('netflix_update', { logs: netflixEngine.getUnviewedLogs() });
+});
+
+// Actualizar contactos cada 60 segundos con manejo de errores
+setInterval(async () => {
+    if (isConnected && client) {
+        try {
+            const rawContacts = await client.getContacts();
+            contacts = rawContacts
+                .filter(c => c.id.server === 'c.us' || c.id.server === 'g.us')
+                .map(c => ({
+                    id: c.id._serialized,
+                    name: c.name || c.pushname || c.number || c.id.user,
+                    number: c.number || c.id.user,
+                    isGroup: c.isGroup || false
+                }));
+            io.emit('contacts_update', contacts);
+        } catch (e) {
+            console.error('Error obteniendo contactos:', e.message);
+        }
+    }
+}, 60000);
+
+function initBot() {
+    const config = getConfig();
+    messageQueue = new MessageQueue(config.queueInterval || 3000);
+
+    // Inicializar NetflixEngine después de tener messageQueue
+    netflixEngine = new NetflixEngine(io, messageQueue);
+    netflixEngine.startAllIdle();
+
+    client = new Client({
+        authStrategy: new LocalAuth({ dataPath: AUTH_PATH }),
+        puppeteer: {
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        }
+    });
+
+    client.on('qr', (qr) => {
+        botStatus = "Esperando QR";
+        isConnected = false;
+        lastQR = qr;
+        qrcode.toDataURL(qr, (err, url) => {
+            if (!err) {
+                lastQRImage = url;
+                io.emit('qr_update', url);
+            } else {
+                console.error('Error generando QR:', err);
+                lastQRImage = null;
+            }
+            io.emit('connection_status', { connected: false, status: botStatus });
+            io.emit('status_update', botStatus);
+        });
+    });
+
+    client.on('ready', async () => {
+        botStatus = "Conectado";
+        isConnected = true;
+        lastQR = null;
+        lastQRImage = null;
+        io.emit('qr_clear');
+        io.emit('status_update', botStatus);
+        io.emit('connection_status', { connected: true, status: botStatus });
+        console.log('✅ Bot conectado -', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+
+        try {
+            const rawContacts = await client.getContacts();
+            contacts = rawContacts
+                .filter(c => c.id.server === 'c.us' || c.id.server === 'g.us')
+                .map(c => ({
+                    id: c.id._serialized,
+                    name: c.name || c.pushname || c.number || c.id.user,
+                    number: c.number || c.id.user,
+                    isGroup: c.isGroup || false
+                }));
+            io.emit('contacts_update', contacts);
+        } catch (e) {
+            console.error('Error cargando contactos iniciales:', e.message);
+        }
+    });
+
+    client.on('authenticated', () => console.log('🔐 Autenticado'));
+    client.on('auth_failure', (msg) => {
+        console.error('❌ Auth failure:', msg);
+        botStatus = "Error de autenticación";
+        io.emit('status_update', botStatus);
+    });
+    client.on('disconnected', (reason) => {
+        botStatus = "Desconectado";
+        isConnected = false;
+        lastQR = null;
+        lastQRImage = null;
+        contacts = [];
+        io.emit('status_update', botStatus);
+        io.emit('connection_status', { connected: false, status: botStatus });
+        io.emit('qr_clear');
+        io.emit('contacts_update', []);
+        console.log('❌ Bot desconectado:', reason);
+        // No reiniciamos el bot automáticamente, el usuario debe escanear QR nuevamente
+    });
+
+    client.on('message', async (msg) => {
+        try {
+            if (msg.from === 'status@broadcast') return;
+            const db = getDB();
+            const phone = msg.from.replace('@c.us', '');
+            if (db.excluded.some(ex => phone.includes(ex.phone))) return;
+
+            const text = msg.body.toLowerCase().trim();
+            const trigger = db.training.find(t => {
+                const key = t.key.toLowerCase().trim();
+                const msgText = msg.body;
+                if (key.includes(' ')) return msgText.toLowerCase().includes(key);
+                else {
+                    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const regex = new RegExp('\\b' + escapedKey + '\\b', 'i');
+                    return regex.test(msgText);
+                }
+            });
+
+            if (trigger) {
+                const config = getConfig();
+                if (config.responseDelay > 0) await delay(config.responseDelay * 1000);
+                if (trigger.mediaPaths && trigger.mediaPaths.length > 0) {
+                    try {
+                        const firstMedia = MessageMedia.fromFilePath(trigger.mediaPaths[0]);
+                        messageQueue.enqueue(msg.from, firstMedia, { caption: trigger.response });
+                        for (let i = 1; i < trigger.mediaPaths.length; i++) {
+                            const media = MessageMedia.fromFilePath(trigger.mediaPaths[i]);
+                            messageQueue.enqueue(msg.from, media);
+                        }
+                    } catch (e) {
+                        messageQueue.enqueue(msg.from, trigger.response);
+                    }
+                } else {
+                    messageQueue.enqueue(msg.from, trigger.response);
+                }
+                db.stats.replied++;
+            } else if (!msg.from.includes('@g.us')) {
+                const config = getConfig();
+                if (!config.disableLearning && msg.type === 'chat' && !msg.hasMedia) {
+                    const msgData = {
+                        text: msg.body, from: phone,
+                        date: nowRD().format('DD/MM HH:mm'),
+                        hasMedia: msg.hasMedia, type: msg.type
+                    };
+                    if (!db.learning.some(l => l.text === msg.body && l.from === phone)) {
+                        db.learning.push(msgData);
+                    }
+                }
+            }
+            db.stats.total++;
+            saveDB(db);
+            io.emit('data_update', db);
+        } catch (e) {
+            console.error('Error en mensaje:', e);
+        }
+    });
+
+    client.initialize().catch(e => console.error("Error al iniciar cliente:", e));
+}
+
+async function createBackup() {
+    try {
+        const timestamp = nowRD().format('YYYY-MM-DD_HH-mm-ss');
+        const backupData = {
+            date: nowRD().format('DD/MM/YYYY HH:mm'),
+            database: getDB(),
+            config: getConfig()
+        };
+        const backupFile = path.join(BACKUP_PATH, 'backup_' + timestamp + '.json');
+        fs.writeFileSync(backupFile, JSON.stringify(backupData, null, 2));
+        console.log('✅ Backup creado:', backupFile);
+        return backupFile;
+    } catch (e) {
+        console.error('❌ Error backup:', e);
+        return null;
+    }
+}
+
+async function sendBackupToWhatsApp(backupFile) {
+    if (!isConnected) return false;
+    const freshConfig = getConfig();
+    if (!freshConfig.backupPhone || freshConfig.backupPhone.trim() === '') return false;
+    try {
+        const chatId = freshConfig.backupPhone.includes('@') ? freshConfig.backupPhone : freshConfig.backupPhone + '@c.us';
+        const media = MessageMedia.fromFilePath(backupFile);
+        messageQueue.enqueue(chatId, media, {
+            caption: '🔐 *Backup GZMBOT*\n\n📅 Fecha: ' + nowRD().format('DD/MM/YYYY HH:mm') + '\n🕐 Hora RD\n\n✅ Copia de seguridad completada'
+        });
+        return true;
+    } catch (e) {
+        console.error('❌ Error encolando backup:', e);
+        return false;
+    }
+}
+
+cron.schedule('0 0 * * *', async () => {
+    console.log('🔄 [CRON] Backup automático iniciado');
+    const bf = await createBackup();
+    if (bf) await sendBackupToWhatsApp(bf);
+}, { scheduled: true, timezone: TZ });
+
+cron.schedule('* * * * *', () => {
+    if (!isConnected) return;
+    const db = getDB();
+    const currentRD = nowRD().format('YYYY-MM-DDTHH:mm');
+    let changed = false;
+    for (let i = db.reminders.length - 1; i >= 0; i--) {
+        const rem = db.reminders[i];
+        if (rem.date === currentRD) {
+            console.log('🔔 Encolando recordatorio para', rem.name);
+            const chatId = rem.phone.includes('@') ? rem.phone : rem.phone + '@c.us';
+            messageQueue.enqueue(chatId, rem.message);
+            if (rem.freq === 'Diario') rem.date = moment.tz(rem.date, TZ).add(1, 'days').format('YYYY-MM-DDTHH:mm');
+            else if (rem.freq === 'Semanal') rem.date = moment.tz(rem.date, TZ).add(7, 'days').format('YYYY-MM-DDTHH:mm');
+            else if (rem.freq === 'Mensual') rem.date = moment.tz(rem.date, TZ).add(1, 'months').format('YYYY-MM-DDTHH:mm');
+            else if (rem.freq === 'Anual') rem.date = moment.tz(rem.date, TZ).add(1, 'years').format('YYYY-MM-DDTHH:mm');
+            else db.reminders.splice(i, 1);
+            changed = true;
+        }
+    }
+    if (changed) { saveDB(db); io.emit('data_update', db); }
+}, { scheduled: true, timezone: TZ });
+
+function scheduleLearningCleanup(period) {
+    const map = { '24h': '0 0 * * *', '2d': '0 0 */2 * *', '7d': '0 0 * * 0', '30d': '0 0 1 * *' };
+    if (!map[period]) return null;
+    return cron.schedule(map[period], () => {
+        const db = getDB();
+        if (db.learning?.length) {
+            db.learning = [];
+            if (db.stats) db.stats.total = 0;
+            saveDB(db);
+            io.emit('data_update', db);
+            console.log('🧹 Limpieza automática de aprendizaje ejecutada');
+        }
+    }, { scheduled: true, timezone: TZ });
+}
+
+let cleanupCron = null;
+function updateCleanupSchedule(period) {
+    if (cleanupCron) { cleanupCron.stop(); cleanupCron = null; }
+    if (period !== 'never') cleanupCron = scheduleLearningCleanup(period);
+}
+updateCleanupSchedule(getConfig().autoCleanLearning);
+
+setInterval(() => {
+    if (netflixEngine) {
+        netflixEngine.cleanupExpiredViewedLogs();
+        netflixEngine.cleanupOldLogs();
+    }
+}, 60000);
+
+initBot();
+
+const checkAuth = (req, res, next) => req.session.user ? next() : res.status(401).send("Unauthorized");
+
+app.get('/', (req, res) => req.session.user ? res.sendFile(path.join(__dirname, 'views/index.html')) : res.redirect('/login'));
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'views/login.html')));
+
+app.post('/login', (req, res) => {
+    const fc = getConfig();
+    if (req.body.user === fc.adminUser && req.body.pass === fc.adminPassword) {
+        req.session.user = req.body.user;
+        res.json({ ok: true });
+    } else res.json({ ok: false });
+});
+
+app.get('/api/data', checkAuth, (req, res) => {
+    const cfg = getConfig();
+    res.json({
+        ...getDB(),
+        botStatus,
+        qr: lastQR,
+        isConnected,
+        backupPhone: cfg.backupPhone || '',
+        responseDelay: cfg.responseDelay || 0,
+        queueInterval: cfg.queueInterval || 3000,
+        disableLearning: cfg.disableLearning || false,
+        autoCleanLearning: cfg.autoCleanLearning || 'never',
+        queueSize: messageQueue ? messageQueue.size() : 0,
+        serverTime: nowRD().format('DD/MM/YYYY HH:mm:ss'),
+        timezone: TZ,
+        netflixConfig: cfg.netflix,
+        netflixLogs: netflixEngine ? netflixEngine.getUnviewedLogs() : []
+    });
+});
+
+app.get('/api/contacts', checkAuth, (req, res) => res.json(contacts));
+app.get('/api/server-time', checkAuth, (req, res) => res.json({ serverTimeRD: nowRD().format('DD/MM/YYYY HH:mm:ss'), serverTimeUTC: moment.utc().format('DD/MM/YYYY HH:mm:ss'), timezone: TZ }));
+
+app.post('/api/train', checkAuth, upload.array('media', 10), (req, res) => {
+    const db = getDB();
+    const { id, key, response } = req.body;
+    const trainData = { key, response, mediaPaths: req.files?.map(f => f.path) || [], mediaTypes: req.files?.map(f => f.mimetype) || [] };
+    if (id && id !== "undefined") {
+        if (db.training[id]?.mediaPaths) db.training[id].mediaPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+        db.training[id] = trainData;
+    } else db.training.push(trainData);
+    if (key) {
+        const idx = db.learning.findIndex(l => l.text.toLowerCase().trim() === key.toLowerCase().trim());
+        if (idx !== -1) db.learning.splice(idx, 1);
+    }
+    saveDB(db);
+    io.emit('data_update', db);
+    res.json({ ok: true });
+});
+
+app.delete('/api/train/:id', checkAuth, (req, res) => {
+    const db = getDB();
+    const item = db.training[req.params.id];
+    if (item?.mediaPaths) item.mediaPaths.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+    db.training.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+
+app.get('/api/train/template', checkAuth, (req, res) => {
+    const template = '# PLANTILLA DE ENTRENAMIENTO GZMBOT\n# FORMATO:\n# PREGUNTA: texto\n# RESPUESTA: texto\n# ---\n\nPREGUNTA: hola\nRESPUESTA: ¡Hola!\n---\n';
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=plantilla_entrenamiento.txt');
+    res.send(template);
+});
+
+app.post('/api/train/import', checkAuth, upload.single('file'), (req, res) => {
+    try {
+        const content = fs.readFileSync(req.file.path, 'utf-8');
+        const lines = content.split('\n');
+        const db = getDB();
+        let q = '', r = '', imported = 0;
+        for (let line of lines) {
+            line = line.trim();
+            if (line.startsWith('#') || line === '') continue;
+            if (line.startsWith('PREGUNTA:')) q = line.replace('PREGUNTA:', '').trim();
+            else if (line.startsWith('RESPUESTA:')) r = line.replace('RESPUESTA:', '').trim().replace(/\\n/g, '\n');
+            else if (line === '---' && q && r) {
+                db.training.push({ key: q, response: r, mediaPaths: [], mediaTypes: [] });
+                imported++; q = ''; r = '';
+            }
+        }
+        if (q && r) { db.training.push({ key: q, response: r, mediaPaths: [], mediaTypes: [] }); imported++; }
+        saveDB(db); io.emit('data_update', db); fs.unlinkSync(req.file.path);
+        res.json({ ok: true, imported });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/api/train/export', checkAuth, (req, res) => {
+    const db = getDB();
+    let content = '# RESPUESTAS GZMBOT\n';
+    db.training.forEach(t => {
+        if (!t.mediaPaths?.length) content += `PREGUNTA: ${t.key}\nRESPUESTA: ${t.response.replace(/\n/g, '\\n')}\n---\n\n`;
+    });
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=respuestas_exportadas.txt');
+    res.send(content);
+});
+
+app.post('/api/reminders', checkAuth, (req, res) => {
+    const db = getDB();
+    const { id, name, phone, message, freq, date } = req.body;
+    const data = { name, phone: phone.replace(/\D/g, ''), message, freq, date };
+    if (id && id !== "undefined") db.reminders[id] = data;
+    else db.reminders.push(data);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+
+app.delete('/api/reminders/:id', checkAuth, (req, res) => {
+    const db = getDB(); db.reminders.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+
+app.post('/api/exclude', checkAuth, (req, res) => {
+    const db = getDB(); db.excluded.push(req.body);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+app.delete('/api/exclude/:id', checkAuth, (req, res) => {
+    const db = getDB(); db.excluded.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+app.delete('/api/learning/:id', checkAuth, (req, res) => {
+    const db = getDB(); db.learning.splice(req.params.id, 1);
+    saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+app.post('/api/learning/clear-all', checkAuth, (req, res) => {
+    const db = getDB(); db.learning = []; if (db.stats) db.stats.total = 0; saveDB(db); io.emit('data_update', db); res.json({ ok: true });
+});
+
+app.post('/api/config/credentials', checkAuth, (req, res) => {
+    const fc = getConfig();
+    if (req.body.user) fc.adminUser = req.body.user;
+    if (req.body.pass) fc.adminPassword = req.body.pass;
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2));
+    res.json({ ok: true });
+});
+app.post('/api/config/backup-phone', checkAuth, (req, res) => {
+    const fc = getConfig(); fc.backupPhone = req.body.backupPhone || ''; fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2)); res.json({ ok: true });
+});
+app.post('/api/config/delay', checkAuth, (req, res) => {
+    const fc = getConfig(); fc.responseDelay = parseFloat(req.body.delay) || 0; fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2)); io.emit('config_update', { responseDelay: fc.responseDelay }); res.json({ ok: true });
+});
+app.post('/api/config/queue-interval', checkAuth, (req, res) => {
+    const fc = getConfig(); fc.queueInterval = parseInt(req.body.interval) || 3000; fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2)); if (messageQueue) messageQueue.setInterval(fc.queueInterval); io.emit('config_update', { queueInterval: fc.queueInterval }); res.json({ ok: true });
+});
+app.post('/api/config/disable-learning', checkAuth, (req, res) => {
+    const fc = getConfig(); fc.disableLearning = req.body.disable === true; fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2)); io.emit('config_update', { disableLearning: fc.disableLearning }); res.json({ ok: true });
+});
+app.post('/api/config/auto-clean-learning', checkAuth, (req, res) => {
+    const fc = getConfig(); fc.autoCleanLearning = req.body.period || 'never'; fs.writeFileSync(CONFIG_PATH, JSON.stringify(fc, null, 2)); updateCleanupSchedule(fc.autoCleanLearning); io.emit('config_update', { autoCleanLearning: fc.autoCleanLearning }); res.json({ ok: true });
+});
+
+app.get('/api/backup/download', checkAuth, async (req, res) => {
+    const bf = await createBackup(); if (bf) res.download(bf, path.basename(bf)); else res.status(500).json({ ok: false });
+});
+app.post('/api/backup/send', checkAuth, async (req, res) => {
+    if (!isConnected) return res.json({ ok: false, message: 'Bot no conectado' });
+    const fc = getConfig(); if (!fc.backupPhone) return res.json({ ok: false, message: 'No hay número configurado' });
+    const bf = await createBackup(); if (!bf) return res.json({ ok: false, message: 'Error creando backup' });
+    const sent = await sendBackupToWhatsApp(bf); res.json({ ok: sent });
+});
+app.post('/api/backup/restore', checkAuth, upload.single('backup'), (req, res) => {
+    try {
+        const bc = JSON.parse(fs.readFileSync(req.file.path, 'utf-8'));
+        if (bc.database) saveDB(bc.database);
+        if (bc.config) {
+            const cc = getConfig();
+            const nc = { ...bc.config, adminUser: cc.adminUser, adminPassword: cc.adminPassword, sessionSecret: cc.sessionSecret };
+            fs.writeFileSync(CONFIG_PATH, JSON.stringify(nc, null, 2));
+            if (netflixEngine) {
+                netflixEngine.stopAllIdle();
+                netflixEngine = new NetflixEngine(io, messageQueue);
+                netflixEngine.startAllIdle();
+            }
+        }
+        fs.unlinkSync(req.file.path);
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Netflix endpoints
+app.post('/api/netflix/config', checkAuth, (req, res) => {
+    try {
+        const cfg = getConfig();
+        cfg.netflix = { accounts: req.body.accounts || [] };
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+        if (netflixEngine) {
+            netflixEngine.stopAllIdle();
+            netflixEngine = new NetflixEngine(io, messageQueue);
+            netflixEngine.startAllIdle();
+        }
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+});
+
+app.get('/api/netflix/logs', checkAuth, (req, res) => {
+    try {
+        const logs = netflixEngine ? netflixEngine.getUnviewedLogs() : [];
+        res.json({ ok: true, logs });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+});
+
+app.post('/api/netflix/logs/:id/view', checkAuth, (req, res) => {
+    try {
+        const success = netflixEngine ? netflixEngine.markLogAsViewed(req.params.id) : false;
+        if (success && netflixEngine) io.emit('netflix_update', { logs: netflixEngine.getUnviewedLogs() });
+        res.json({ ok: success });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+});
+
+app.delete('/api/netflix/logs/:id', checkAuth, (req, res) => {
+    try {
+        if (netflixEngine) netflixEngine.deleteLog(req.params.id);
+        if (netflixEngine) io.emit('netflix_update', { logs: netflixEngine.getUnviewedLogs() });
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+});
+
+app.post('/api/logout-wa', checkAuth, async (req, res) => {
+    try {
+        await client.logout();
+        try { client.destroy(); } catch(e) {}
+        if (fs.existsSync(AUTH_PATH)) fs.rmSync(AUTH_PATH, { recursive: true, force: true });
+        isConnected = false; botStatus = "Desconectado"; lastQR = null; lastQRImage = null; contacts = [];
+        const db = getDB(); db.stats.replied = 0; db.stats.total = 0; saveDB(db);
+        io.emit('data_update', db); io.emit('connection_status', { connected: false, status: botStatus }); io.emit('qr_clear'); io.emit('contacts_update', []);
+        res.json({ ok: true });
+        setTimeout(() => initBot(), 1500);
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+server.listen(config.port, '127.0.0.1', () => {
+    console.log('🚀 GZMBOT ONLINE en puerto', config.port);
+    console.log('🕐 Hora RD:', nowRD().format('DD/MM/YYYY HH:mm:ss'));
+    console.log('📺 Netflix Hogar Multi-cuenta: IDLE activo (procesamiento instantáneo)');
+});
+APPEOF
+
+# ----------------------------------------------------------------------
+# 12. FRONTEND (index.html) - SIN CAMBIOS MAYORES (se mantiene igual que antes)
+# ----------------------------------------------------------------------
+cat <<'HTMLEOF' > views/index.html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GZMBOT | Enterprise</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0a0a0f; color: #f4f4f5; font-family: 'Inter', sans-serif; background-image: radial-gradient(circle at 30% 10%, rgba(37, 99, 235, 0.08) 0%, transparent 40%); }
+        .glass { background: rgba(18,18,24,0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.03); box-shadow: 0 20px 40px -12px rgba(0,0,0,0.6); }
+        .glass-card { background: rgba(24,24,32,0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.02); border-radius: 28px; transition: all 0.2s ease; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+        .glass-card:hover { border-color: rgba(37,99,235,0.4); transform: translateY(-2px); box-shadow: 0 15px 35px -10px #2563eb40; }
+        .sidebar-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 16px; color: #a1a1aa; transition: all 0.2s; cursor: pointer; font-weight: 500; margin-bottom: 4px; font-size: 14px; }
+        .sidebar-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
+        .sidebar-item.active { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff; box-shadow: 0 8px 20px -6px #2563eb; }
+        .page { display: none; animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .page.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        input, select, textarea { background: #0f0f13 !important; border: 1px solid #27272a !important; color: #fff !important; padding: 14px 18px !important; border-radius: 20px !important; outline: none; width: 100%; font-size: 15px; transition: border 0.2s, box-shadow 0.2s; }
+        input:focus, textarea:focus, select:focus { border-color: #2563eb !important; box-shadow: 0 0 0 3px rgba(37,99,235,0.2); }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 10px; }
+        .stat-value { font-size: 2.5rem; font-weight: 800; line-height: 1; background: linear-gradient(to right, #e5e7eb, #2563eb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .badge { padding: 4px 12px; border-radius: 40px; font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); }
+        .reminder-item, .learning-item { background: rgba(39,39,45,0.4); border-radius: 20px; padding: 16px; border: 1px solid rgba(255,255,255,0.02); margin-bottom: 8px; }
+        .reminder-item:hover, .learning-item:hover { background: rgba(55,55,65,0.5); }
+        .aluminum-title { color: #f0f0f3; font-weight: 700; letter-spacing: -0.02em; }
+        .aluminum-logo { background: linear-gradient(135deg, #ffffff, #cbd5e1); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; letter-spacing: -0.03em; }
+        .media-preview { max-width: 100px; max-height: 100px; border-radius: 16px; margin: 4px; object-fit: cover; border: 1px solid #2a2a2e; }
+        .media-type-selector { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .media-type-btn { padding: 8px 18px; background: #0f0f13; border: 1px solid #27272a; border-radius: 14px; cursor: pointer; transition: all 0.3s; color: #fff; font-size: 14px; font-weight: 500; }
+        .media-type-btn.active { background: #2563eb; border-color: #2563eb; box-shadow: 0 4px 12px #2563eb50; }
+        .media-preview-container { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+        .media-item { position: relative; }
+        .media-remove { position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; font-weight: bold; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); align-items: center; justify-content: center; z-index: 1000; }
+        .modal.active { display: flex; }
+        .modal-content { background: #1c1c22; border-radius: 40px; max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto; padding: 24px; border: 1px solid #2f2f37; box-shadow: 0 30px 50px -20px black; }
+        .contact-item { padding: 14px; border-radius: 18px; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid #2a2a30; }
+        .contact-item:hover { background: #2a2a32; }
+        .toast { position: fixed; bottom: 24px; right: 24px; background: #23232b; border-left: 5px solid #2563eb; padding: 14px 24px; border-radius: 40px; box-shadow: 0 20px 35px -8px black; transform: translateY(120px); opacity: 0; transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); z-index: 2000; color: #fff; font-weight: 500; display: flex; align-items: center; gap: 12px; backdrop-filter: blur(8px); }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .clock-modern { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
+        .clock-time { font-size: clamp(2rem,5vw,3.2rem); font-weight: 800; background: linear-gradient(to right, #2563eb, #60a5fa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.02em; }
+        .clock-date { font-size: clamp(0.85rem,2vw,1.1rem); color: #a1a1aa; }
+        #qr-container { display: flex; justify-content: center; align-items: center; background: white; border-radius: 32px; padding: 20px; box-shadow: 0 20px 40px -10px rgba(0,0,0,0.5); margin: 0 auto; }
+        #qr-img { display: flex; justify-content: center; align-items: center; width: 240px; height: 240px; }
+        #qr-img img { width: 100%; height: 100%; object-fit: contain; border-radius: 16px; }
+        .bot-logo { background: linear-gradient(145deg, #2563eb, #1e40af); box-shadow: 0 10px 20px -5px #2563eb80; border-radius: 18px; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
+        .bot-logo i { color: white; width: 28px; height: 28px; }
+        .config-card { background: rgba(24,24,32,0.7); backdrop-filter: blur(12px); border-radius: 28px; padding: 28px; border: 1px solid rgba(255,255,255,0.03); }
+        .config-divider { height: 1px; background: rgba(255,255,255,0.05); margin: 24px 0; }
+        .switch { position: relative; display: inline-block; width: 52px; height: 28px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #3a3a44; transition: .3s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 24px; width: 24px; left: 2px; bottom: 2px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: #22c55e; }
+        input:checked + .slider:before { transform: translateX(24px); }
+        .log-entry { background: rgba(30,30,36,0.5); border-radius: 20px; padding: 20px; border: 1px solid rgba(255,255,255,0.03); margin-bottom: 12px; cursor: pointer; transition: all 0.2s ease; }
+        .log-entry:hover { background: rgba(40,40,50,0.7); transform: translateY(-1px); }
+        .log-code { font-family: 'Courier New', monospace; background: #2563eb20; padding: 4px 12px; border-radius: 8px; color: #60a5fa; letter-spacing: 2px; font-weight: 600; }
+        .netflix-icon { background: linear-gradient(135deg, #E50914, #b20710); border-radius: 16px; padding: 12px; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; }
+        .netflix-icon i { color: white; width: 32px; height: 32px; }
+        .netflix-page-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+        .interaction-step { font-size: 12px; color: #a1a1aa; margin-top: 4px; border-left: 2px solid #2563eb; padding-left: 8px; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+    <div id="toast" class="toast"><i data-lucide="check-circle" class="text-green-500 w-5 h-5"></i><span id="toast-message"></span></div>
+    <div id="contactModal" class="modal" onclick="if(event.target===this) closeContactModal()"><div class="modal-content glass"><div class="flex justify-between items-center mb-5"><h3 class="text-2xl font-bold aluminum-title">Seleccionar contacto / grupo</h3><button onclick="closeContactModal()" class="text-zinc-400 hover:text-white p-2 hover:bg-white/5 rounded-full transition"><i data-lucide="x" class="w-6 h-6"></i></button></div><input type="text" id="contactSearch" placeholder="Buscar..." class="mb-5"><div id="contactList" class="space-y-1 max-h-96 overflow-y-auto pr-1"></div><div class="mt-6 text-right"><button onclick="closeContactModal()" class="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 rounded-2xl font-medium transition">Cancelar</button></div></div></div>
+
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass border-r border-white/5 -translate-x-full lg:translate-x-0 lg:static transition-transform duration-300 flex flex-col p-6 overflow-y-auto"><div class="flex items-center gap-3 mb-10 px-2"><div class="bot-logo"><i data-lucide="bot" class="w-7 h-7"></i></div><span class="text-2xl font-extrabold tracking-tight aluminum-logo">GZMBOT</span></div><nav class="space-y-1 flex-1"><div onclick="nav('dash'); if(window.innerWidth<1024) toggleSidebar()" id="n-dash" class="sidebar-item active"><i data-lucide="layout-dashboard" class="w-5 h-5"></i><span>Dashboard</span></div><div onclick="nav('conn'); if(window.innerWidth<1024) toggleSidebar()" id="n-conn" class="sidebar-item"><i data-lucide="qr-code" class="w-5 h-5"></i><span>Conexión</span></div><div onclick="nav('train'); if(window.innerWidth<1024) toggleSidebar()" id="n-train" class="sidebar-item"><i data-lucide="message-square" class="w-5 h-5"></i><span>Respuestas</span></div><div onclick="nav('learn'); if(window.innerWidth<1024) toggleSidebar()" id="n-learn" class="sidebar-item"><i data-lucide="brain" class="w-5 h-5"></i><span>Aprender</span></div><div onclick="nav('rem'); if(window.innerWidth<1024) toggleSidebar()" id="n-rem" class="sidebar-item"><i data-lucide="bell" class="w-5 h-5"></i><span>Recordatorios</span></div><div onclick="nav('excl'); if(window.innerWidth<1024) toggleSidebar()" id="n-excl" class="sidebar-item"><i data-lucide="shield-off" class="w-5 h-5"></i><span>Excluidos</span></div><div onclick="nav('netflix'); if(window.innerWidth<1024) toggleSidebar()" id="n-netflix" class="sidebar-item"><i data-lucide="tv" class="w-5 h-5"></i><span>Hogar Netflix</span></div><div onclick="nav('config'); if(window.innerWidth<1024) toggleSidebar()" id="n-config" class="sidebar-item"><i data-lucide="settings" class="w-5 h-5"></i><span>Ajustes</span></div></nav><button onclick="location.href='/login'" class="sidebar-item text-red-400 hover:bg-red-500/10 mt-6"><i data-lucide="log-out" class="w-5 h-5"></i><span>Salir</span></button></aside>
+    
+    <main id="main-content" class="flex-1 flex flex-col min-w-0 overflow-hidden" onclick="if(window.innerWidth<1024 && !document.getElementById('sidebar').classList.contains('-translate-x-full')) toggleSidebar()">
+        <header class="lg:hidden p-5 glass border-b border-white/5 flex justify-between items-center flex-shrink-0"><span class="font-bold text-xl aluminum-logo">GZMBOT</span><button onclick="toggleSidebar(); event.stopPropagation()" class="p-2.5 text-zinc-400 hover:text-white hover:bg-white/5 rounded-xl transition"><i data-lucide="menu" class="w-6 h-6"></i></button></header>
+        <div class="flex-1 overflow-y-auto p-5 sm:p-7 lg:p-9 space-y-7">
+            <!-- Dashboard -->
+            <div id="p-dash" class="page active"><div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5 mb-8"><h1 class="text-4xl font-bold aluminum-title">Panel de Control</h1><div id="server-clock" class="clock-modern"><div class="clock-time" id="clock-time">--:--:-- --</div><div class="clock-date" id="clock-date">cargando...</div></div><div class="px-5 py-3 glass-card flex items-center gap-3"><div id="dot" class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div><span id="bot-status" class="text-xs font-semibold uppercase tracking-wider text-zinc-300">Desconectado</span></div></div><div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-10"><div class="glass-card p-7 flex items-center gap-5"><div class="w-16 h-16 rounded-2xl bg-blue-500/20 flex items-center justify-center"><i data-lucide="message-circle" class="w-8 h-8 text-blue-400"></i></div><div><p class="text-zinc-400 text-sm font-medium mb-1">Respondidas</p><h2 id="s-replied" class="stat-value">0</h2></div></div><div class="glass-card p-7 flex items-center gap-5"><div class="w-16 h-16 rounded-2xl bg-blue-500/20 flex items-center justify-center"><i data-lucide="users" class="w-8 h-8 text-blue-400"></i></div><div><p class="text-zinc-400 text-sm font-medium mb-1">Total mensajes</p><h2 id="s-total" class="stat-value">0</h2></div></div></div><div class="glass-card p-7 mb-10"><div class="flex items-center gap-3 mb-5"><i data-lucide="bell" class="w-6 h-6 text-emerald-400"></i><h3 class="font-semibold text-xl aluminum-title">Recordatorios de hoy</h3><span class="badge bg-emerald-500/10 text-emerald-400 ml-auto">HOY</span></div><div id="today-reminders-list" class="space-y-3"><div class="text-zinc-500 text-sm py-5 text-center">Cargando...</div></div><button onclick="nav('rem')" class="mt-4 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1 font-medium">Ver todos <i data-lucide="arrow-right" class="w-4 h-4"></i></button></div><div id="recent-learning-card" class="glass-card p-7"><div class="flex items-center gap-3 mb-5"><i data-lucide="brain" class="w-6 h-6 text-amber-400"></i><h3 class="font-semibold text-xl aluminum-title">Últimos mensajes sin respuesta</h3></div><div id="recent-learning-list" class="space-y-3 max-h-80 overflow-y-auto pr-2"><div class="text-zinc-500 text-sm py-5 text-center">No hay datos</div></div><button onclick="nav('learn')" class="mt-4 text-sm text-blue-400 hover:text-blue-300 transition flex items-center gap-1 font-medium">Ir a aprender <i data-lucide="arrow-right" class="w-4 h-4"></i></button></div></div>
+            <!-- Conexión -->
+            <div id="p-conn" class="page"><h2 class="text-3xl font-bold aluminum-title mb-6">Conexión WhatsApp</h2><div class="max-w-lg mx-auto glass-card p-10 text-center"><div id="qr-container" class="inline-block mb-7"><div id="qr-img" class="flex items-center justify-center"><span class="text-sm text-gray-500">Esperando código QR...</span></div></div><div id="connected-container" class="hidden mb-7"><div class="w-28 h-28 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-5"><i data-lucide="check-circle" class="w-14 h-14 text-green-500"></i></div><h2 class="text-2xl font-bold text-green-500 mb-2">WhatsApp Vinculado</h2><p class="text-zinc-400">El bot está conectado y funcionando.</p></div><h2 class="text-2xl font-bold aluminum-title mb-2">Escanear código QR</h2><p class="text-zinc-400 text-sm mb-7">Usa WhatsApp para vincular el bot.</p><button id="btn-logout-wa" onclick="logoutWA()" class="hidden w-full py-4 bg-red-500/10 text-red-500 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition"><i data-lucide="unlink" class="inline w-4 h-4 mr-2"></i>DESVINCULAR</button></div></div>
+            <!-- Respuestas, Aprender, Recordatorios, Excluidos (igual) -->
+            <div id="p-train" class="page"><h2 class="text-3xl font-bold aluminum-title mb-5">Gestión de Respuestas</h2><div class="mb-5 flex gap-3 flex-wrap"><button onclick="downloadTemplate()" class="px-5 py-3 bg-purple-600 rounded-xl font-bold flex items-center gap-2 hover:bg-purple-700 transition text-sm shadow-lg"><i data-lucide="download" class="w-4 h-4"></i>Plantilla</button><button onclick="document.getElementById('import-file').click()" class="px-5 py-3 bg-green-600 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition text-sm shadow-lg"><i data-lucide="upload" class="w-4 h-4"></i>Importar</button><button onclick="exportTraining()" class="px-5 py-3 bg-orange-600 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-700 transition text-sm shadow-lg"><i data-lucide="file-text" class="w-4 h-4"></i>Exportar</button><input type="file" id="import-file" accept=".txt" class="hidden" onchange="importTraining(this)"></div><div class="grid lg:grid-cols-3 gap-5 sm:gap-8"><div class="lg:col-span-1 glass p-6 sm:p-7 rounded-3xl h-fit"><h3 class="font-bold mb-5 flex items-center gap-2 aluminum-title text-lg"><i data-lucide="plus-circle" class="text-blue-500 w-5 h-5"></i> Nueva Regla</h3><form id="train-form" enctype="multipart/form-data" onsubmit="saveTrain(event)"><input type="hidden" id="t-id"><input type="text" id="t-key" placeholder="Cuando digan..." class="mb-4" required><textarea id="t-res" placeholder="Responder..." class="h-28 mb-5" required></textarea><div class="mb-5"><label class="block text-sm text-zinc-400 mb-2">Tipo:</label><div class="media-type-selector"><button type="button" onclick="setMediaType('text')" id="mt-text" class="media-type-btn active"><i data-lucide="type" class="inline w-4 h-4 mr-1"></i> Texto</button><button type="button" onclick="setMediaType('image')" id="mt-image" class="media-type-btn"><i data-lucide="image" class="inline w-4 h-4 mr-1"></i> Imagen</button><button type="button" onclick="setMediaType('video')" id="mt-video" class="media-type-btn"><i data-lucide="video" class="inline w-4 h-4 mr-1"></i> Video</button></div></div><div id="media-upload" class="hidden mb-5"><label class="block text-sm text-zinc-400 mb-2">Archivos (máx 10):</label><input type="file" id="t-media" accept="image/*,video/*" multiple><div id="media-preview" class="media-preview-container"></div></div><button type="submit" class="w-full py-4 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition shadow-lg">Guardar</button></form></div><div id="l-train" class="lg:col-span-2 space-y-3"></div></div></div>
+            <div id="p-learn" class="page"><div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5"><h2 class="text-3xl font-bold aluminum-title">Bandeja de Aprendizaje</h2><button onclick="clearAllLearning()" class="px-5 py-3 bg-red-600 rounded-xl font-bold flex items-center gap-2 hover:bg-red-700 transition text-sm shadow-lg"><i data-lucide="trash-2" class="w-4 h-4"></i>Limpiar todo</button></div><p class="text-zinc-400 text-sm mb-5">Conversaciones que el bot no supo responder</p><div id="l-learn" class="space-y-3"></div></div>
+            <div id="p-rem" class="page"><h2 class="text-3xl font-bold aluminum-title mb-5">Recordatorios</h2><div class="glass p-6 sm:p-9 rounded-3xl mb-8"><div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"><h3 class="font-bold text-xl aluminum-title flex items-center gap-2"><i data-lucide="clock" class="w-6 h-6 text-emerald-400"></i> Programar Recordatorio</h3><div class="clock-modern"><div class="clock-time" id="rem-clock-time">--:--:-- --</div><div class="clock-date" id="rem-clock-date">cargando...</div></div></div><p class="text-xs text-zinc-500 mb-5"><i data-lucide="map-pin" class="inline w-3 h-3 mr-1"></i> Hora República Dominicana (UTC-4)</p><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"><input type="hidden" id="r-id"><input type="text" id="r-name" placeholder="Nombre"><div class="relative flex items-center gap-2"><input type="text" id="r-phone" placeholder="Número" class="flex-1"><button type="button" onclick="openContactModal('r-phone', 'r-name')" class="p-3.5 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition"><i data-lucide="users" class="w-5 h-5"></i></button></div><textarea id="r-msg" placeholder="Mensaje" rows="3" class="sm:col-span-2 lg:col-span-2 resize-none"></textarea><select id="r-freq"><option>Una vez</option><option>Diario</option><option>Semanal</option><option>Mensual</option><option>Anual</option></select><input type="datetime-local" id="r-date"></div><button onclick="saveRem()" class="mt-6 w-full sm:w-auto px-10 py-4 bg-emerald-600 rounded-2xl font-bold hover:bg-emerald-700 transition shadow-lg">Programar</button></div><div id="l-rem" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div></div>
+            <div id="p-excl" class="page"><h2 class="text-3xl font-bold aluminum-title mb-5">Números Excluidos</h2><div class="w-full max-w-2xl mx-auto glass p-6 sm:p-9 rounded-3xl"><div class="flex flex-col sm:flex-row gap-3"><input type="text" id="e-name" placeholder="Nombre"><div class="flex items-center gap-2 flex-1"><input type="text" id="e-phone" placeholder="Número"><button type="button" onclick="openContactModal('e-phone', 'e-name')" class="p-3.5 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition"><i data-lucide="users" class="w-5 h-5"></i></button></div><button onclick="saveExcl()" class="bg-white text-black px-7 py-3.5 font-bold rounded-xl hover:bg-zinc-200 transition">Añadir</button></div><div id="l-excl" class="mt-7 space-y-2"></div></div></div>
+
+            <!-- NETFLIX HOGAR -->
+            <div id="p-netflix" class="page">
+                <div class="netflix-page-header">
+                    <div class="netflix-icon"><i data-lucide="tv" class="w-8 h-8"></i></div>
+                    <h2 class="text-4xl font-bold aluminum-title">Hogar Netflix</h2>
+                </div>
+                <div class="flex flex-col lg:flex-row gap-5 h-full" style="min-height:70vh;">
+                    <div class="lg:w-72 flex-shrink-0 glass rounded-3xl p-5 flex flex-col">
+                        <div class="bg-green-500/10 text-green-400 p-3 rounded-xl text-sm mb-4 text-center">
+                            📡 Procesamiento instantáneo (IMAP IDLE)
+                        </div>
+                        <button onclick="refreshNetflixLogs()" class="w-full py-4 bg-red-600 hover:bg-red-700 rounded-2xl font-bold mb-5 flex items-center justify-center gap-2 shadow-lg transition"><i data-lucide="refresh-cw" class="w-5 h-5"></i> Recargar logs</button>
+                        <div class="mt-auto pt-4 border-t border-white/5">
+                            <p class="text-xs text-zinc-500">Los códigos se envían al grupo asignado. La actualización de hogar es automática.</p>
+                        </div>
+                    </div>
+                    <div class="flex-1 flex flex-col min-w-0">
+                        <div class="glass rounded-3xl p-6 flex-1 overflow-y-auto" style="max-height:70vh;" id="netflix-logs-panel">
+                            <div class="flex justify-between items-center mb-6">
+                                <h3 class="text-xl font-bold aluminum-title flex items-center gap-2"><i data-lucide="list" class="w-5 h-5 text-blue-400"></i> Actividad en tiempo real</h3>
+                                <span class="text-sm text-zinc-500" id="netflix-log-count">0 códigos pendientes</span>
+                            </div>
+                            <div id="netflix-logs-container" class="space-y-3">
+                                <div class="text-zinc-500 text-center py-12"><i data-lucide="tv" class="w-16 h-16 mx-auto mb-4 text-zinc-600"></i><p class="text-lg">Sin actividad reciente</p></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ajustes -->
+            <div id="p-config" class="page"><h2 class="text-3xl font-bold aluminum-title mb-5">Configuración</h2><div class="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-7 max-w-5xl mx-auto"><div class="config-card"><h2 class="text-xl font-bold aluminum-title mb-6">Credenciales de Acceso</h2><input type="text" id="conf-user" placeholder="Nuevo Usuario" class="mb-4"><input type="password" id="conf-pass" placeholder="Nueva Contraseña" class="mb-7"><button onclick="saveCredentials()" class="w-full py-4 bg-blue-600 rounded-2xl font-bold hover:bg-blue-700 transition">Actualizar</button></div><div class="config-card"><h2 class="text-xl font-bold aluminum-title mb-5">Copias de Seguridad</h2><div class="mb-6"><p class="text-xs text-zinc-400 mb-2">Número para backups:</p><div class="flex gap-2"><div class="flex items-center gap-2 flex-1"><input type="text" id="conf-backup-phone" placeholder="Ej: 18091234567" class="flex-1"><button type="button" onclick="openContactModal('conf-backup-phone', null)" class="p-3.5 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition"><i data-lucide="users" class="w-5 h-5"></i></button></div><button onclick="saveBackupPhone()" class="px-5 py-3.5 bg-emerald-600 rounded-xl font-bold hover:bg-emerald-700 transition">Guardar</button></div></div><div class="space-y-3"><button onclick="downloadBackup()" class="w-full py-4 bg-green-600 rounded-xl font-bold">Descargar Backup</button><button onclick="sendBackupManually()" class="w-full py-4 bg-blue-600 rounded-xl font-bold">Enviar a WhatsApp</button><button onclick="document.getElementById('restore-file').click()" class="w-full py-4 bg-orange-600 rounded-xl font-bold">Restaurar Backup</button><input type="file" id="restore-file" accept=".json" class="hidden" onchange="restoreBackup(this)"></div></div><div class="config-card md:col-span-2"><h2 class="text-xl font-bold aluminum-title mb-6">Configuración de Envío</h2><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div><div class="flex items-center gap-2 mb-2"><i data-lucide="clock" class="w-5 h-5 text-blue-400"></i><span>Tiempo de espera (segundos)</span></div><div class="flex items-center gap-4"><input type="range" id="response-delay" min="0" max="10" step="0.5" value="0" class="flex-1"><span id="delay-value" class="text-lg font-mono text-blue-400">0.0 s</span></div></div><div><div class="flex items-center gap-2 mb-2"><i data-lucide="layers" class="w-5 h-5 text-orange-400"></i><span>Intervalo entre mensajes (ms)</span></div><div class="flex items-center gap-4"><input type="range" id="queue-interval" min="500" max="10000" step="100" value="3000" class="flex-1"><span id="interval-value" class="text-lg font-mono text-orange-400">3000 ms</span></div><div class="mt-3 text-sm text-zinc-500">Cola: <span id="queue-size" class="font-bold text-orange-400">0</span></div></div></div><div class="config-divider"></div><div class="flex justify-end"><button onclick="saveConfiguracionEnvio()" class="bg-orange-600 hover:bg-orange-700 px-8 py-4 rounded-xl font-bold text-white shadow-lg transition">Guardar</button></div></div><div class="config-card md:col-span-2"><h2 class="text-xl font-bold aluminum-title mb-6 flex items-center gap-2"><i data-lucide="brain" class="w-6 h-6 text-purple-400"></i> Aprendizaje</h2><div class="grid grid-cols-1 md:grid-cols-2 gap-8"><div><div class="flex items-center justify-between"><span>Desactivar aprendizaje</span><label class="switch"><input type="checkbox" id="disable-learning-toggle"><span class="slider"></span></label></div></div><div><label class="block text-sm text-zinc-400 mb-2">Limpiar automáticamente</label><select id="auto-clean-learning" class="w-full"><option value="never">Nunca</option><option value="24h">Cada 24 horas</option><option value="2d">Cada 2 días</option><option value="7d">Cada 7 días</option><option value="30d">Cada 30 días</option></select></div></div><div class="flex justify-end mt-6"><button onclick="saveLearningConfig()" class="bg-green-600 hover:bg-green-700 px-8 py-3 rounded-xl font-bold text-white">Guardar</button></div></div>
+            
+            <!-- CONFIGURACIÓN DE NETFLIX (POR CUENTA) -->
+            <div class="config-card md:col-span-2" id="netflix-config-card"><h2 class="text-xl font-bold aluminum-title mb-6 flex items-center gap-2"><i data-lucide="tv" class="w-6 h-6 text-red-500"></i> Hogar Netflix - Cuentas</h2>
+                <div class="space-y-5">
+                    <div>
+                        <div class="flex justify-between items-center mb-3">
+                            <h3 class="font-semibold">Cuentas de Gmail vinculadas</h3>
+                            <button onclick="addNetflixAccount()" class="text-sm bg-blue-600 px-4 py-2 rounded-xl hover:bg-blue-700 transition">+ Agregar cuenta</button>
+                        </div>
+                        <div id="netflix-accounts-list" class="space-y-4"></div>
+                    </div>
+                    <div class="flex justify-end">
+                        <button onclick="saveNetflixConfig()" class="bg-red-600 hover:bg-red-700 px-8 py-4 rounded-xl font-bold text-white shadow-lg transition">Guardar configuración</button>
+                    </div>
+                </div>
+            </div>
+            </div></div>
+        </div>
+    </main>
+
+    <script>
+        const socket = io();
+        let db = { training:[], learning:[], reminders:[], excluded:[], stats:{ replied:0, total:0 } };
+        let currentMediaType = 'text';
+        let selectedFiles = [];
+        let contacts = [];
+        let activePhoneField = null;
+        let activeNameField = null;
+        let netflixLogs = [];
+        let netflixConfig = { accounts: [] };
+
+        function showToast(m, e=false) { const t=document.getElementById('toast'); document.getElementById('toast-message').textContent=m; t.style.borderLeftColor=e?'#ef4444':'#2563eb'; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),3000); }
+        function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); }
+        function nav(id) { document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); document.querySelectorAll('.sidebar-item').forEach(i=>i.classList.remove('active')); const pe=document.getElementById('p-'+id); if(pe)pe.classList.add('active'); const ne=document.getElementById('n-'+id); if(ne)ne.classList.add('active'); if(id==='netflix')renderNetflixLogs(); lucide.createIcons(); }
+        function updateClock() { const n=new Date(); const o={timeZone:'America/Santo_Domingo',hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'}; document.getElementById('clock-time').textContent=n.toLocaleString('en-US',o); document.getElementById('clock-date').textContent=n.toLocaleDateString('es-ES',{timeZone:'America/Santo_Domingo',weekday:'long',year:'numeric',month:'long',day:'numeric'}); const rt=document.getElementById('rem-clock-time'); if(rt)rt.textContent=n.toLocaleString('en-US',o); const rd=document.getElementById('rem-clock-date'); if(rd)rd.textContent=n.toLocaleDateString('es-ES',{timeZone:'America/Santo_Domingo',weekday:'long',year:'numeric',month:'long',day:'numeric'}); }
+        setInterval(updateClock,1000); updateClock();
+        function openContactModal(pf,nf,og=false) { activePhoneField=pf; activeNameField=nf; document.getElementById('contactModal').classList.add('active'); renderContactList(og); }
+        function closeContactModal() { document.getElementById('contactModal').classList.remove('active'); activePhoneField=null; activeNameField=null; }
+        function renderContactList(og=false) { const s=document.getElementById('contactSearch').value.toLowerCase(); let f=contacts; if(og)f=contacts.filter(c=>c.isGroup); f=f.filter(c=>(c.name&&c.name.toLowerCase().includes(s))||(c.id&&c.id.includes(s))); const l=document.getElementById('contactList'); if(f.length===0){l.innerHTML='<div class="text-zinc-500 text-center py-6">No se encontraron</div>';return;} l.innerHTML=f.map(c=>`<div class="contact-item" onclick="selectContact('${c.id}','${(c.name||'').replace(/'/g,"\\'")}')"><div><div class="contact-name">${c.name||'Sin nombre'}${c.isGroup?'<span class="text-xs bg-blue-500/20 px-2 py-0.5 rounded ml-2">Grupo</span>':''}</div><div class="contact-number">${c.id}</div></div></div>`).join(''); lucide.createIcons(); }
+        document.getElementById('contactSearch')?.addEventListener('input',()=>renderContactList(true));
+        function selectContact(id,name) { if(activePhoneField)document.getElementById(activePhoneField).value=id; if(activeNameField&&document.getElementById(activeNameField))document.getElementById(activeNameField).value=name; closeContactModal(); }
+        socket.on('contacts_update',d=>{contacts=d;if(document.getElementById('contactModal').classList.contains('active'))renderContactList(true);});
+        socket.on('queue_size',s=>document.getElementById('queue-size').textContent=s);
+        socket.on('netflix_update',d=>{netflixLogs=d.logs;renderNetflixLogs();document.getElementById('netflix-log-count').textContent=netflixLogs.length+' códigos pendientes';});
+        socket.on('connection_status',d=>{const qc=document.getElementById('qr-container'),cc=document.getElementById('connected-container'),lb=document.getElementById('btn-logout-wa'),bs=document.getElementById('bot-status'),dot=document.getElementById('dot');if(d.connected){qc.style.display='none';cc.style.display='block';lb.style.display='block';clearQR();bs.innerText='Conectado';dot.className='w-3 h-3 rounded-full bg-green-500';}else{qc.style.display='flex';cc.style.display='none';lb.style.display='none';bs.innerText=d.status||'Desconectado';dot.className='w-3 h-3 rounded-full bg-red-500 animate-pulse';}});
+        socket.on('config_update',c=>{if(c.responseDelay!==undefined){document.getElementById('response-delay').value=c.responseDelay;document.getElementById('delay-value').textContent=c.responseDelay.toFixed(1)+' s';}if(c.queueInterval!==undefined){document.getElementById('queue-interval').value=c.queueInterval;document.getElementById('interval-value').textContent=c.queueInterval+' ms';}if(c.disableLearning!==undefined){document.getElementById('disable-learning-toggle').checked=c.disableLearning;toggleLearningUI(c.disableLearning);}if(c.autoCleanLearning!==undefined)document.getElementById('auto-clean-learning').value=c.autoCleanLearning;});
+        function toggleLearningUI(d){const lm=document.getElementById('n-learn'),rc=document.getElementById('recent-learning-card');if(d){lm.style.display='none';rc.style.display='none';if(document.getElementById('p-learn').classList.contains('active'))nav('dash');}else{lm.style.display='flex';rc.style.display='block';}}
+        function setMediaType(t){currentMediaType=t;document.querySelectorAll('.media-type-btn').forEach(b=>b.classList.remove('active'));document.getElementById('mt-'+t).classList.add('active');if(t==='text'){document.getElementById('media-upload').classList.add('hidden');selectedFiles=[];}else{document.getElementById('media-upload').classList.remove('hidden');document.getElementById('t-media').accept=t==='image'?'image/*':'video/*';}lucide.createIcons();}
+        document.getElementById('t-media')?.addEventListener('change',function(e){const files=Array.from(e.target.files);if(files.length>10){alert('Máximo 10');return;}selectedFiles=files;const preview=document.getElementById('media-preview');preview.innerHTML='';files.forEach((file,index)=>{const reader=new FileReader();reader.onload=function(ev){const div=document.createElement('div');div.className='media-item';if(file.type.startsWith('image/')){div.innerHTML='<img src="'+ev.target.result+'" class="media-preview"><div class="media-remove" onclick="removeMediaFile('+index+')">×</div>';}else{div.innerHTML='<video src="'+ev.target.result+'" class="media-preview" controls></video><div class="media-remove" onclick="removeMediaFile('+index+')">×</div>';}preview.appendChild(div);};reader.readAsDataURL(file);});});
+        function removeMediaFile(i){selectedFiles.splice(i,1);const dt=new DataTransfer();selectedFiles.forEach(f=>dt.items.add(f));document.getElementById('t-media').files=dt.files;document.getElementById('t-media').dispatchEvent(new Event('change'));}
+        function showQR(u){const q=document.getElementById('qr-img');if(q)q.innerHTML='<img src="'+u+'" class="w-full">';}
+        function clearQR(){const q=document.getElementById('qr-img');if(q)q.innerHTML='<span class="text-sm text-gray-500">Esperando código QR...</span>';}
+        socket.on('qr_update',u=>showQR(u)); socket.on('qr_clear',()=>clearQR()); socket.on('data_update',d=>{db=d;render();});
+        
+        async function load(){
+            try{
+                const r=await fetch('/api/data');if(r.status===401){location.href='/login';return;}
+                const d=await r.json();db=d;
+                document.getElementById('conf-backup-phone').value=d.backupPhone||'';
+                document.getElementById('response-delay').value=d.responseDelay||0;
+                document.getElementById('delay-value').textContent=(d.responseDelay||0).toFixed(1)+' s';
+                document.getElementById('queue-interval').value=d.queueInterval||3000;
+                document.getElementById('interval-value').textContent=(d.queueInterval||3000)+' ms';
+                document.getElementById('queue-size').textContent=d.queueSize||0;
+                document.getElementById('disable-learning-toggle').checked=d.disableLearning||false;
+                document.getElementById('auto-clean-learning').value=d.autoCleanLearning||'never';
+                toggleLearningUI(d.disableLearning);
+                
+                netflixConfig = d.netflixConfig || { accounts: [] };
+                renderNetflixAccounts();
+                
+                netflixLogs = d.netflixLogs||[];
+                renderNetflixLogs();
+                
+                const qc=document.getElementById('qr-container'),cc=document.getElementById('connected-container'),lb=document.getElementById('btn-logout-wa'),bs=document.getElementById('bot-status'),dot=document.getElementById('dot');
+                if(d.isConnected){qc.style.display='none';cc.style.display='block';lb.style.display='block';clearQR();bs.innerText='Conectado';dot.className='w-3 h-3 rounded-full bg-green-500';}else{qc.style.display='flex';cc.style.display='none';lb.style.display='none';bs.innerText=d.botStatus||'Desconectado';dot.className='w-3 h-3 rounded-full bg-red-500 animate-pulse';}
+                
+                render();
+                const cr=await fetch('/api/contacts');contacts=await cr.json();
+                lucide.createIcons();
+            }catch(e){console.error(e);}
+        }
+        
+        function esc(t){if(!t)return '';const d=document.createElement('div');d.appendChild(document.createTextNode(t));return d.innerHTML;}
+        function formatDate(d){if(!d)return'';try{return new Date(d).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return d;}}
+        function render(){
+            document.getElementById('s-replied').innerText=db.stats?db.stats.replied:0;
+            document.getElementById('s-total').innerText=db.stats?db.stats.total:0;
+            const today=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Santo_Domingo'}));
+            const todayStr=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+            const todayRem=(db.reminders||[]).map((r,i)=>({...r,i})).filter(r=>r.date.startsWith(todayStr)).slice(0,5);
+            const tre=document.getElementById('today-reminders-list');
+            if(todayRem.length===0)tre.innerHTML='<div class="text-zinc-500 text-sm py-5 text-center">No hay recordatorios para hoy</div>';
+            else tre.innerHTML=todayRem.map(r=>`<div class="reminder-item flex justify-between"><div><div class="font-medium">${esc(r.name)}</div><div class="text-xs text-zinc-500">${esc(r.phone)}</div></div><div class="text-right"><div class="text-sm text-emerald-400">${formatDate(r.date)}</div><span class="badge">${r.freq}</span></div></div>`).join('');
+            const rl=(db.learning||[]).slice(-5).reverse();
+            const le=document.getElementById('recent-learning-list');
+            if(rl.length===0)le.innerHTML='<div class="text-zinc-500 text-sm py-5 text-center">No hay mensajes nuevos</div>';
+            else le.innerHTML=rl.map(l=>`<div class="learning-item"><div class="flex justify-between"><span class="text-xs text-zinc-500">${l.date} · ${l.from}</span><button onclick="useLFromDashboard('${esc(l.text)}')" class="text-blue-400 text-xs">Usar</button></div><p class="text-sm mt-2">${esc(l.text)}</p></div>`).join('');
+            document.getElementById('l-train').innerHTML=(db.training||[]).map((t,i)=>`<div class="glass p-5 rounded-2xl"><div class="flex justify-between"><div><b>P:</b> ${esc(t.key)}${t.mediaPaths&&t.mediaPaths.length?`<span class="text-xs bg-blue-500/20 px-2 py-1 rounded">${t.mediaPaths.length} archivo(s)</span>`:''}<br><span class="text-sm text-zinc-400">R: ${esc(t.response)}</span></div><div><button onclick="editT(${i})" class="p-2"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="delT(${i})" class="p-2 text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div></div>`).join('');
+            document.getElementById('l-learn').innerHTML=(!db.learning||db.learning.length===0)?'<div class="glass p-8 text-center text-zinc-500">No hay conversaciones nuevas</div>':db.learning.map((l,i)=>`<div class="glass p-4 rounded-2xl flex justify-between"><div><div class="text-xs text-zinc-500">${l.date} · ${l.from}</div><b>${esc(l.text)}</b></div><div><button onclick="useL(${i})" class="bg-blue-600 px-3 py-1 rounded text-xs">Configurar</button><button onclick="delL(${i})" class="text-red-500 ml-2">X</button></div></div>`).join('');
+            document.getElementById('l-rem').innerHTML=(db.reminders||[]).map((r,i)=>`<div class="glass-card p-5"><div><h3 class="font-bold">${esc(r.name)}</h3><p class="text-sm text-zinc-400">${esc(r.phone)}</p><p class="text-sm">${esc(r.message)}</p><div class="flex gap-2 mt-2"><span class="badge">${r.freq}</span><span class="badge">${formatDate(r.date)}</span></div></div><div class="flex gap-1 mt-2"><button onclick="editR(${i})" class="text-blue-400">Editar</button><button onclick="delR(${i})" class="text-red-500">Eliminar</button></div></div>`).join('');
+            document.getElementById('l-excl').innerHTML=(db.excluded||[]).map((e,i)=>`<div class="glass p-3 rounded-xl flex justify-between"><span>${esc(e.name)} (${esc(e.phone)})</span><button onclick="delE(${i})" class="text-red-500">X</button></div>`).join('');
+            lucide.createIcons();
+        }
+
+        // Funciones Netflix
+        function renderNetflixLogs() {
+            const container = document.getElementById('netflix-logs-container');
+            if (!container) return;
+            if (!netflixLogs || netflixLogs.length === 0) {
+                container.innerHTML = '<div class="text-zinc-500 text-center py-12"><i data-lucide="tv" class="w-16 h-16 mx-auto mb-4 text-zinc-600"></i><p class="text-lg">Sin actividad reciente</p></div>';
+                document.getElementById('netflix-log-count').textContent = '0 códigos pendientes';
+                return;
+            }
+            container.innerHTML = netflixLogs.map(log => {
+                const date = formatDate(log.timestamp);
+                let content = '';
+                if (log.code) {
+                    content += `<div class="flex items-center gap-2 text-lg font-semibold"><span class="log-code">${log.code}</span><span class="text-xs text-zinc-500 ml-2">${log.codeSentTo.join(', ') || 'pendiente'}</span></div>`;
+                }
+                if (log.linkInteraction) {
+                    const successIcon = log.linkInteraction.success ? '✅' : '❌';
+                    content += `<div class="text-sm text-zinc-400 mt-2"><span class="mr-2">${successIcon}</span> Actualización automática: ${log.linkInteraction.finalMessage}</div>`;
+                    if (log.linkInteraction.steps && log.linkInteraction.steps.length) {
+                        content += `<div class="interaction-step">${log.linkInteraction.steps.slice(-2).join(' → ')}</div>`;
+                    }
+                } else if (log.link) {
+                    content += `<div class="text-sm text-zinc-500">Enlace detectado, proceso automático ejecutado.</div>`;
+                }
+                const isVerification = log.isAccountVerification ? '<span class="badge bg-yellow-500/10 text-yellow-400 ml-2">Verificación</span>' : '';
+                return `<div class="log-entry" onclick="dismissLog('${log.id}')">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="text-xs text-zinc-500 mb-1">${date} · ${esc(log.account)}${isVerification}</div>
+                            <div class="space-y-1">${content || '<span class="text-zinc-400 italic">Procesado</span>'}</div>
+                        </div>
+                        <div class="text-zinc-500 text-xs mt-1">Tocar para ocultar</div>
+                    </div>
+                </div>`;
+            }).join('');
+            document.getElementById('netflix-log-count').textContent = netflixLogs.length + ' códigos pendientes';
+        }
+
+        async function dismissLog(id) {
+            try {
+                const r = await fetch('/api/netflix/logs/'+id+'/view', { method:'POST' });
+                const d = await r.json();
+                if (d.ok) {
+                    netflixLogs = netflixLogs.filter(l => l.id !== id);
+                    renderNetflixLogs();
+                    showToast('Este código se eliminará del sistema en 10 minutos.');
+                } else {
+                    showToast('Error al marcar como visto', true);
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        async function refreshNetflixLogs() {
+            try {
+                const r = await fetch('/api/netflix/logs');
+                const d = await r.json();
+                if (d.ok) {
+                    netflixLogs = d.logs;
+                    renderNetflixLogs();
+                }
+            } catch(e) { showToast('Error al recargar logs', true); }
+        }
+
+        function renderNetflixAccounts() {
+            const container = document.getElementById('netflix-accounts-list');
+            if (!container) return;
+            if (!netflixConfig.accounts || netflixConfig.accounts.length === 0) {
+                container.innerHTML = '<div class="text-zinc-500 text-sm">No hay cuentas agregadas</div>';
+                return;
+            }
+            container.innerHTML = netflixConfig.accounts.map((acc, idx) => `
+                <div class="bg-zinc-800/50 p-4 rounded-xl space-y-3">
+                    <div class="flex items-center gap-3">
+                        <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <input type="email" placeholder="Email" value="${esc(acc.email)}" onchange="updateAccount(${idx}, 'email', this.value)" class="w-full">
+                            <input type="password" placeholder="Contraseña de aplicación" value="${esc(acc.password)}" onchange="updateAccount(${idx}, 'password', this.value)" class="w-full">
+                        </div>
+                        <button onclick="removeAccount(${idx})" class="text-red-400 hover:text-red-300 p-2"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+                        <div class="flex items-center gap-2">
+                            <input type="text" placeholder="ID del grupo (opcional)" value="${esc(acc.groupPhone||'')}" onchange="updateAccount(${idx}, 'groupPhone', this.value)" class="flex-1">
+                            <button onclick="openContactModalForAccount(${idx})" class="p-2.5 bg-zinc-700 rounded-xl hover:bg-zinc-600 transition"><i data-lucide="users" class="w-4 h-4"></i></button>
+                        </div>
+                        <div class="flex items-center gap-2 text-sm">
+                            <input type="checkbox" id="verif-${idx}" ${acc.sendVerificationCodesToGroup ? 'checked' : ''} onchange="updateAccount(${idx}, 'sendVerificationCodesToGroup', this.checked)" class="w-4 h-4">
+                            <label for="verif-${idx}" class="text-zinc-400">Enviar verificación al grupo</label>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function openContactModalForAccount(idx) {
+            activePhoneField = null;
+            activeNameField = null;
+            const originalSelect = selectContact;
+            selectContact = function(id, name) {
+                const acc = netflixConfig.accounts[idx];
+                if (acc) {
+                    acc.groupPhone = id;
+                    renderNetflixAccounts();
+                }
+                selectContact = originalSelect;
+                closeContactModal();
+            };
+            openContactModal(null, null, true);
+        }
+
+        function addNetflixAccount() {
+            netflixConfig.accounts.push({ email: '', password: '', groupPhone: '', sendVerificationCodesToGroup: false });
+            renderNetflixAccounts();
+        }
+
+        function removeAccount(idx) {
+            netflixConfig.accounts.splice(idx, 1);
+            renderNetflixAccounts();
+        }
+
+        function updateAccount(idx, field, value) {
+            if (field === 'sendVerificationCodesToGroup') {
+                netflixConfig.accounts[idx].sendVerificationCodesToGroup = value;
+            } else {
+                netflixConfig.accounts[idx][field] = value;
+            }
+        }
+
+        async function saveNetflixConfig() {
+            try {
+                const r = await fetch('/api/netflix/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accounts: netflixConfig.accounts })
+                });
+                const d = await r.json();
+                if (d.ok) showToast('Configuración Netflix guardada');
+                else showToast('Error: ' + (d.message||''), true);
+            } catch(e) { showToast('Error de conexión', true); }
+        }
+
+        // Funciones existentes del bot
+        function useLFromDashboard(t){document.getElementById('t-key').value=t;nav('train');setTimeout(()=>document.getElementById('t-res').focus(),300);}
+        async function saveTrain(e){e.preventDefault();const fd=new FormData();fd.append('id',document.getElementById('t-id').value);fd.append('key',document.getElementById('t-key').value);fd.append('response',document.getElementById('t-res').value);if(currentMediaType!=='text'&&selectedFiles.length>0)selectedFiles.forEach(f=>fd.append('media',f));const r=await fetch('/api/train',{method:'POST',body:fd});if(r.ok){showToast('Respuesta guardada');document.getElementById('t-id').value='';document.getElementById('t-key').value='';document.getElementById('t-res').value='';document.getElementById('t-media').value='';document.getElementById('media-preview').innerHTML='';selectedFiles=[];setMediaType('text');load();}else showToast('Error al guardar',true);}
+        function editT(i){const t=db.training[i];document.getElementById('t-id').value=i;document.getElementById('t-key').value=t.key;document.getElementById('t-res').value=t.response;if(t.mediaPaths&&t.mediaPaths.length>0&&t.mediaTypes&&t.mediaTypes[0])setMediaType(t.mediaTypes[0].includes('image')?'image':'video');window.scrollTo({top:0,behavior:'smooth'});}
+        async function delT(i){if(confirm('¿Eliminar?')){const r=await fetch('/api/train/'+i,{method:'DELETE'});if(r.ok){showToast('Eliminada');load();}else showToast('Error',true);}}
+        function useL(i){document.getElementById('t-key').value=db.learning[i].text;nav('train');setTimeout(()=>document.getElementById('t-res').focus(),300);}
+        async function delL(i){const r=await fetch('/api/learning/'+i,{method:'DELETE'});if(r.ok){showToast('Mensaje eliminado');load();}else showToast('Error',true);}
+        async function clearAllLearning(){if(confirm('¿Limpiar toda la bandeja?')){const r=await fetch('/api/learning/clear-all',{method:'POST'});if(r.ok){showToast('Bandeja limpiada');load();}else showToast('Error',true);}}
+        async function saveRem(){const d={id:document.getElementById('r-id').value,name:document.getElementById('r-name').value,phone:document.getElementById('r-phone').value,message:document.getElementById('r-msg').value,freq:document.getElementById('r-freq').value,date:document.getElementById('r-date').value};if(!d.name||!d.phone||!d.message||!d.date){alert('Completa todos');return;}const r=await fetch('/api/reminders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});if(r.ok){showToast('Recordatorio guardado');document.getElementById('r-id').value='';document.getElementById('r-name').value='';document.getElementById('r-phone').value='';document.getElementById('r-msg').value='';document.getElementById('r-date').value='';load();}else showToast('Error',true);}
+        function editR(i){const r=db.reminders[i];document.getElementById('r-id').value=i;document.getElementById('r-name').value=r.name;document.getElementById('r-phone').value=r.phone;document.getElementById('r-msg').value=r.message;document.getElementById('r-freq').value=r.freq;document.getElementById('r-date').value=r.date;window.scrollTo({top:0});}
+        async function delR(i){if(confirm('¿Eliminar recordatorio?')){const r=await fetch('/api/reminders/'+i,{method:'DELETE'});if(r.ok){showToast('Eliminado');load();}else showToast('Error',true);}}
+        async function saveExcl(){const n=document.getElementById('e-name').value,p=document.getElementById('e-phone').value;if(!n||!p){alert('Completa');return;}const r=await fetch('/api/exclude',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,phone:p})});if(r.ok){showToast('Excluido añadido');document.getElementById('e-name').value='';document.getElementById('e-phone').value='';load();}else showToast('Error',true);}
+        async function delE(i){if(confirm('¿Eliminar excluido?')){const r=await fetch('/api/exclude/'+i,{method:'DELETE'});if(r.ok){showToast('Eliminado');load();}else showToast('Error',true);}}
+        async function saveCredentials(){const u=document.getElementById('conf-user').value,p=document.getElementById('conf-pass').value;if(!u&&!p){alert('Ingresa al menos un campo');return;}const r=await fetch('/api/config/credentials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:u,pass:p})});if(r.ok){showToast('Credenciales actualizadas');setTimeout(()=>location.href='/login',1500);}else showToast('Error',true);}
+        async function saveBackupPhone(){const bp=document.getElementById('conf-backup-phone').value.replace(/\D/g,'');const r=await fetch('/api/config/backup-phone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({backupPhone:bp})});if(r.ok)showToast('Número guardado');else showToast('Error',true);}
+        async function saveConfiguracionEnvio(){const delay=parseFloat(document.getElementById('response-delay').value);const interval=parseInt(document.getElementById('queue-interval').value);try{await fetch('/api/config/delay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delay})});await fetch('/api/config/queue-interval',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({interval})});showToast('Configuración guardada');}catch(e){showToast('Error',true);}}
+        async function saveLearningConfig(){const disable=document.getElementById('disable-learning-toggle').checked;const period=document.getElementById('auto-clean-learning').value;try{await fetch('/api/config/disable-learning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({disable})});await fetch('/api/config/auto-clean-learning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period})});showToast('Aprendizaje guardado');toggleLearningUI(disable);}catch(e){showToast('Error',true);}}
+        document.getElementById('response-delay')?.addEventListener('input',e=>document.getElementById('delay-value').textContent=parseFloat(e.target.value).toFixed(1)+' s');
+        document.getElementById('queue-interval')?.addEventListener('input',e=>document.getElementById('interval-value').textContent=e.target.value+' ms');
+        function downloadBackup(){window.location.href='/api/backup/download';}
+        function downloadTemplate(){window.location.href='/api/train/template';}
+        function exportTraining(){window.location.href='/api/train/export';}
+        async function sendBackupManually(){const p=document.getElementById('conf-backup-phone').value;if(!p.trim()){alert('Guarda un número primero');return;}if(!confirm('¿Enviar backup?'))return;const r=await fetch('/api/backup/send',{method:'POST'});const d=await r.json();if(d.ok)showToast('Backup enviado');else showToast(d.message||'Error',true);}
+        async function restoreBackup(i){if(!i.files[0])return;if(!confirm('¿Restaurar backup?')){i.value='';return;}const fd=new FormData();fd.append('backup',i.files[0]);const r=await fetch('/api/backup/restore',{method:'POST',body:fd});const d=await r.json();if(d.ok){showToast('Backup restaurado');setTimeout(()=>location.reload(),1500);}else showToast('Error: '+(d.error||''),true);i.value='';}
+        async function importTraining(i){if(!i.files[0])return;const fd=new FormData();fd.append('file',i.files[0]);const r=await fetch('/api/train/import',{method:'POST',body:fd});const d=await r.json();if(d.ok){showToast(`✅ ${d.imported} importadas`);load();}else showToast('Error: '+(d.error||''),true);i.value='';}
+        async function logoutWA(){if(confirm('¿Desvincular?')){const r=await fetch('/api/logout-wa',{method:'POST'});if(r.ok){showToast('Desconectado, recargando...');setTimeout(()=>location.reload(),3500);}else showToast('Error',true);}}
+        window.onload=load;
+        lucide.createIcons();
+    </script>
+</body>
+</html>
+HTMLEOF
+
+# ===================== LOGIN =====================
+cat <<'LOGINEOF' > views/login.html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GZMBOT | Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;800&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        body { background: #0a0a0f; font-family: 'Inter', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 16px; background-image: radial-gradient(circle at 50% 50%, rgba(37,99,235,0.1) 0%, transparent 60%); }
+        .glow { position: absolute; width: 600px; height: 600px; background: radial-gradient(circle, rgba(37,99,235,0.15) 0%, transparent 70%); z-index: -1; }
+        .card { background: rgba(18,18,24,0.9); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.03); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        .aluminum-title { color: #e5e7eb; font-weight: 800; letter-spacing: -0.02em; }
+    </style>
+</head>
+<body>
+    <div class="glow"></div>
+    <div class="card p-8 sm:p-12 rounded-[2.5rem] sm:rounded-[3.5rem] w-full max-w-md shadow-2xl text-center">
+        <h1 class="text-3xl sm:text-4xl font-black mb-2 tracking-tight aluminum-title">GZMBOT</h1>
+        <p class="text-blue-500 font-bold text-[10px] uppercase tracking-[0.3em] mb-8 sm:mb-10">Administrative Panel</p>
+        <form onsubmit="login(event)" class="space-y-4">
+            <input type="text" id="u" placeholder="Usuario maestro" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
+            <input type="password" id="p" placeholder="Contraseña" class="w-full p-4 bg-black/40 rounded-2xl border border-white/5 text-white outline-none text-base" required>
+            <button type="submit" class="w-full py-4 sm:py-5 bg-blue-600 rounded-2xl text-white font-black hover:scale-[1.02] active:scale-95 transition-all">ACCEDER AHORA</button>
+        </form>
+    </div>
+    <script>
+        async function login(e) {
+            e.preventDefault();
+            const r = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user:document.getElementById('u').value, pass:document.getElementById('p').value}) });
+            const d = await r.json();
+            if (d.ok) location.href='/'; else alert("Credenciales incorrectas");
+        }
+    </script>
+</body>
+</html>
+LOGINEOF
+
+# ----------------------------------------------------------------------
+# 13. INSTALAR DEPENDENCIAS DE NODE
+# ----------------------------------------------------------------------
+echo "📦 Instalando dependencias de Node.js..."
+cd $HOME/gzmbot
+npm install --legacy-peer-deps \
+    whatsapp-web.js \
+    qrcode \
+    express \
+    socket.io \
+    express-session \
+    puppeteer \
+    moment-timezone \
+    node-cron \
+    multer \
+    imapflow \
+    mailparser \
+    nodemailer \
+    axios
+
+sudo npm install -g pm2
+pm2 delete gzmbot 2>/dev/null
+pm2 start app.js --name gzmbot --env TZ=America/Santo_Domingo
+pm2 save
+pm2 startup systemd -u $USER --hp $HOME
+sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u $USER --hp $HOME
+
+# ----------------------------------------------------------------------
+# 14. INSTALAR NGINX Y CONFIGURAR PROXY CON SSL
+# ----------------------------------------------------------------------
+echo "🔧 Instalando Nginx y configurando SSL con Let's Encrypt..."
+sudo apt-get install -y nginx certbot python3-certbot-nginx
+
+sudo tee /etc/nginx/sites-available/gzmbot > /dev/null <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+    client_max_body_size 50M;
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+sudo ln -sf /etc/nginx/sites-available/gzmbot /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN --redirect
+
+# ----------------------------------------------------------------------
+# 15. MOSTRAR INFORMACIÓN FINAL
+# ----------------------------------------------------------------------
+echo "===================================================="
+echo "✨ GZMBOT ENTERPRISE (NETFLIX HOGAR FINAL) INSTALADO"
+echo "===================================================="
+echo "🌐 PANEL: https://$DOMAIN"
+echo "👤 USUARIO: $ADMIN_USER"
+echo "🔐 PASS: $ADMIN_PASS"
+echo "🕐 TIMEZONE: America/Santo_Domingo (UTC-4)"
+echo ""
+echo "📺 NETFLIX HOGAR:"
+echo "   - DETECCIÓN INSTANTÁNEA DE CORREOS (IMAP IDLE)"
+echo "   - Envío de códigos solo al grupo asignado"
+echo "   - Actualización automática del hogar con Puppeteer"
+echo "   - Los logs muestran cada paso y resultado"
+echo "===================================================="
