@@ -8,7 +8,7 @@ Creado por **gerargzm** · [![Telegram](https://img.shields.io/badge/Telegram-@g
 
 ## 🚀 Instalación en un comando
 
-Ejecuta esto en tu servidor **Debian** o **Ubuntu** (cualquier versión):
+Ejecuta esto en tu servidor **Ubuntu** (cualquier versión):
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/gerarvpn/GZMBOT/main/v2)
