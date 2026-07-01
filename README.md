@@ -11,4 +11,4 @@ Creado por **gerargzm** · [![Telegram](https://img.shields.io/badge/Telegram-@g
 Ejecuta esto en tu servidor **Ubuntu** (cualquier versión):
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/gerarvpn/GZMBOT/main/v2)
+bash <(curl -Ls https://raw.githubusercontent.com/gerarvpn/GZMBOT/main/v1.0)
