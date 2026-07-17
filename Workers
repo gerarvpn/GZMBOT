@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>gzmnet · Coordenadas de Transferencia</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --bg-primary: #0c0c12;
+            --green-light: #6ee7b7;
+            --green-medium: #34d399;
+            --green-dark: #10b981;
+            --glass-bg: rgba(12, 12, 18, 0.75);
+            --glass-border: rgba(52, 211, 153, 0.2);
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            background: var(--bg-primary);
+            color: #f3f4f6;
+            font-family: 'Inter', sans-serif;
+            overflow-x:hidden;
+            position:relative;
+            min-height:100vh;
+        }
+        .bg-waves {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background: var(--bg-primary);
+            overflow: hidden;
+        }
+        .wave {
+            position: absolute;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(110, 231, 183, 0.25) 0%, transparent 70%);
+            animation: waveMove 22s infinite ease-in-out alternate;
+            width: 900px;
+            height: 900px;
+            top: -250px;
+            left: -250px;
+            filter: blur(30px);
+        }
+        .wave:nth-child(2) {
+            width: 1100px;
+            height: 1100px;
+            top: auto;
+            bottom: -350px;
+            right: -350px;
+            animation-duration: 28s;
+            animation-delay: -6s;
+            background: radial-gradient(circle, rgba(52, 211, 153, 0.20) 0%, transparent 70%);
+            filter: blur(40px);
+        }
+        .wave:nth-child(3) {
+            width: 700px;
+            height: 700px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation-duration: 32s;
+            animation-delay: -12s;
+            background: radial-gradient(circle, rgba(110, 231, 183, 0.15) 0%, transparent 70%);
+            filter: blur(35px);
+        }
+        @keyframes waveMove {
+            0% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(100px, -80px) scale(1.15); }
+            66% { transform: translate(-60px, 100px) scale(0.85); }
+            100% { transform: translate(80px, -60px) scale(1.05); }
+        }
+
+        .glass-card {
+            background: rgba(20, 20, 30, 0.5);
+            border: 1px solid rgba(52, 211, 153, 0.08);
+            transition: all .4s cubic-bezier(.4,0,.2,1);
+            border-radius: 1.5rem;
+        }
+        .glass-card:hover {
+            border-color: rgba(52, 211, 153, 0.3);
+            box-shadow: 0 12px 40px -12px rgba(52, 211, 153, 0.15);
+            transform: translateY(-3px);
+        }
+
+        .btn-green {
+            background: linear-gradient(135deg, #0d9488 0%, #10b981 50%, #34d399 100%) !important;
+            box-shadow: 0 8px 30px -6px rgba(52, 211, 153, 0.25);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            color: #fff !important;
+            border: none;
+            font-weight: 700;
+        }
+        .btn-green:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 38px -4px rgba(52, 211, 153, 0.4);
+            filter: brightness(1.05);
+            color: #fff !important;
+        }
+        .btn-green:active { transform: translateY(1px); }
+
+        .btn-copy {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(52, 211, 153, 0.08);
+            color: #e5e7eb;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            cursor: pointer;
+            border-radius: 1rem;
+            padding: 0.6rem 1rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: 100%;
+            user-select: none;
+        }
+        .btn-copy:hover {
+            background: rgba(52, 211, 153, 0.06);
+            border-color: rgba(52, 211, 153, 0.3);
+            color: #ffffff;
+        }
+        .btn-copy.copied {
+            background: rgba(16, 185, 129, 0.1) !important;
+            border-color: rgba(16, 185, 129, 0.4) !important;
+            color: #34d399 !important;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.15) !important;
+        }
+
+        .logo-box {
+            position: relative;
+        }
+        .logo-box::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: currentColor;
+            opacity: 0.06;
+            pointer-events: none;
+        }
+
+        .header-island {
+            position: sticky;
+            top: 12px;
+            z-index: 40;
+            width: calc(100% - 40px);
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(12,12,18,0.6);
+            backdrop-filter: blur(24px) saturate(200%);
+            border: 1px solid rgba(52,211,153,0.08);
+            border-radius: 999px;
+            padding: 6px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(52,211,153,0.04);
+            transition: all 0.3s ease;
+            height: 56px;
+        }
+        .header-island:hover {
+            background: rgba(12,12,18,0.8);
+            border-color: rgba(52,211,153,0.12);
+        }
+        .header-island .brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .header-island .brand .logo-text {
+            font-size: 18px;
+            font-weight: 900;
+            font-family: 'Outfit', sans-serif;
+            color: #ffffff;
+        }
+        .header-island .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 14px 4px 10px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            border: 1px solid rgba(52,211,153,0.12);
+            background: rgba(52,211,153,0.06);
+            color: #ffffff;
+        }
+        .header-island .status-badge .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green-medium);
+            animation: pulse-dot 2s infinite;
+        }
+        @keyframes pulse-dot {
+            0% { box-shadow:0 0 0 0 rgba(52,211,153,0.4); }
+            70% { box-shadow:0 0 0 8px rgba(52,211,153,0); }
+            100% { box-shadow:0 0 0 0 rgba(52,211,153,0); }
+        }
+
+        .toast-container {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-width: 380px;
+            pointer-events: none;
+        }
+        .toast {
+            background: rgba(12,12,18,0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(52,211,153,0.12);
+            border-radius: 1rem;
+            padding: 1rem 1.25rem;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            transform: translateY(20px);
+            opacity: 0;
+            transition: all .3s cubic-bezier(.4,0,.2,1);
+            pointer-events: auto;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .toast-icon {
+            background: rgba(52,211,153,0.08);
+            border-radius: 0.75rem;
+            padding: 0.5rem;
+            color: var(--green-medium);
+            flex-shrink: 0;
+        }
+        .toast-success .toast-icon { background:rgba(52,211,153,0.1); color:var(--green-medium); }
+        .toast-error .toast-icon { background:rgba(239,68,68,0.1); color:#f87171; }
+        .toast-body { flex:1; }
+        .toast-title { font-size:0.75rem; font-weight:700; color:#fff; text-transform:uppercase; letter-spacing:0.05em; }
+        .toast-message { font-size:0.8rem; color:#d1d5db; margin-top:0.15rem; line-height:1.4; }
+        .toast-close { background:transparent; border:none; color:#6b7280; cursor:pointer; padding:0.25rem; transition:color .2s; }
+        .toast-close:hover { color:#fff; }
+
+        @media (max-width:640px) {
+            .header-island {
+                width: calc(100% - 20px);
+                padding: 4px 14px;
+                border-radius: 20px;
+                height: 48px;
+                top: 8px;
+            }
+            .header-island .brand .logo-text { font-size: 15px; }
+            .header-island .status-badge { font-size: 8px; padding: 2px 10px 2px 8px; }
+            .header-island .status-badge .dot { width: 6px; height: 6px; }
+        }
+
+        .main-content {
+            padding-top: 1.5rem;
+        }
+
+        .bank-icon {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.7rem;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.04);
+        }
+        .bank-tag {
+            font-size: 0.6rem;
+            font-weight: 700;
+            padding: 0.1rem 0.6rem;
+            border-radius: 999px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Evitar selección en la tarjeta */
+        .card-no-click {
+            cursor: default;
+        }
+        .btn-copy {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="bg-waves">
+        <div class="wave"></div>
+        <div class="wave"></div>
+        <div class="wave"></div>
+    </div>
+
+    <header class="header-island">
+        <div class="brand">
+            <span class="logo-text">GZMNET</span>
+        </div>
+        <div class="status-badge">
+            <span class="dot"></span>
+            <span>Seguro</span>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-6 md:px-12 py-8 w-full flex-grow main-content">
+        
+        <div class="glass-card p-6 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10">
+            <div class="space-y-1">
+                <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Beneficiario Titular</p>
+                <div class="flex items-center gap-2.5">
+                    <h2 class="text-lg font-bold text-white tracking-tight">
+                        Gerardo Antonio Guzmán Pérez
+                    </h2>
+                    <button onclick="copyData('Gerardo Antonio Guzmán Pérez', 'Beneficiario', this)" class="text-gray-400 hover:text-white transition p-1.5 hover:bg-white/5 rounded-lg" title="Copiar nombre">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="hidden sm:block text-right">
+                <p class="text-[10px] text-emerald-400 uppercase tracking-widest font-bold">Estado</p>
+                <p class="text-xs text-gray-400 mt-0.5">Listo para recibir transferencias</p>
+            </div>
+        </div>
+
+        <div class="text-center sm:text-left mb-8">
+            <h3 class="text-xl font-bold text-white tracking-tight">Cuentas disponibles</h3>
+            <p class="text-xs text-gray-400 mt-1">Haz clic en el botón "Copiar" de cada tarjeta.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            
+            <!-- Banreservas -->
+            <div class="glass-card p-6 rounded-2xl flex flex-col justify-between h-[210px] card-no-click">
+                <div class="flex justify-between items-start">
+                    <div class="flex items-center gap-3">
+                        <div class="bank-icon text-blue-400 logo-box">BR</div>
+                        <div>
+                            <h4 class="font-bold text-white text-sm">Banreservas</h4>
+                            <p class="text-[11px] text-gray-500">Ahorros</p>
+                        </div>
+                    </div>
+                    <span class="bank-tag bg-blue-500/10 text-blue-300">RD$</span>
+                </div>
+                <div class="py-2">
+                    <p class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Número de cuenta</p>
+                    <span class="font-mono text-lg font-bold text-white tracking-wider">9606508068</span>
+                </div>
+                <button class="btn-copy" onclick="copyData('9606508068', 'Cuenta Banreservas', this)">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2"></path>
+                    </svg>
+                    <span>Copiar Cuenta</span>
+                </button>
+            </div>
+
+            <!-- Popular -->
+            <div class="glass-card p-6 rounded-2xl flex flex-col justify-between h-[210px] card-no-click">
+                <div class="flex justify-between items-start">
+                    <div class="flex items-center gap-3">
+                        <div class="bank-icon text-emerald-400 logo-box">BP</div>
+                        <div>
+                            <h4 class="font-bold text-white text-sm">Banco Popular</h4>
+                            <p class="text-[11px] text-gray-500">Ahorros</p>
+                        </div>
+                    </div>
+                    <span class="bank-tag bg-emerald-500/10 text-emerald-300">RD$</span>
+                </div>
+                <div class="py-2">
+                    <p class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Número de cuenta</p>
+                    <span class="font-mono text-lg font-bold text-white tracking-wider">846416352</span>
+                </div>
+                <button class="btn-copy" onclick="copyData('846416352', 'Cuenta Popular', this)">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2"></path>
+                    </svg>
+                    <span>Copiar Cuenta</span>
+                </button>
+            </div>
+
+            <!-- Qik -->
+            <div class="glass-card p-6 rounded-2xl flex flex-col justify-between h-[210px] card-no-click">
+                <div class="flex justify-between items-start">
+                    <div class="flex items-center gap-3">
+                        <div class="bank-icon text-purple-400 logo-box">QK</div>
+                        <div>
+                            <h4 class="font-bold text-white text-sm">Qik Banco</h4>
+                            <p class="text-[11px] text-gray-500">Ahorros Digital</p>
+                        </div>
+                    </div>
+                    <span class="bank-tag bg-purple-500/10 text-purple-300">RD$</span>
+                </div>
+                <div class="py-2">
+                    <p class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Número de cuenta</p>
+                    <span class="font-mono text-lg font-bold text-white tracking-wider">1003603969</span>
+                </div>
+                <button class="btn-copy" onclick="copyData('1003603969', 'Cuenta Qik', this)">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2"></path>
+                    </svg>
+                    <span>Copiar Cuenta</span>
+                </button>
+            </div>
+
+            <!-- APAP -->
+            <div class="glass-card p-6 rounded-2xl flex flex-col justify-between h-[210px] card-no-click">
+                <div class="flex justify-between items-start">
+                    <div class="flex items-center gap-3">
+                        <div class="bank-icon text-amber-400 logo-box">AP</div>
+                        <div>
+                            <h4 class="font-bold text-white text-sm">APAP</h4>
+                            <p class="text-[11px] text-gray-500">Asociación Popular</p>
+                        </div>
+                    </div>
+                    <span class="bank-tag bg-amber-500/10 text-amber-300">RD$</span>
+                </div>
+                <div class="py-2">
+                    <p class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Número de cuenta</p>
+                    <span class="font-mono text-lg font-bold text-white tracking-wider">1031489622</span>
+                </div>
+                <button class="btn-copy" onclick="copyData('1031489622', 'Cuenta APAP', this)">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2"></path>
+                    </svg>
+                    <span>Copiar Cuenta</span>
+                </button>
+            </div>
+
+            <!-- PayPal -->
+            <div class="glass-card p-6 rounded-2xl flex flex-col justify-between h-[210px] card-no-click">
+                <div class="flex justify-between items-start">
+                    <div class="flex items-center gap-3">
+                        <div class="bank-icon text-cyan-400 logo-box">PP</div>
+                        <div>
+                            <h4 class="font-bold text-white text-sm">PayPal</h4>
+                            <p class="text-[11px] text-gray-500">Pago Internacional</p>
+                        </div>
+                    </div>
+                    <span class="bank-tag bg-cyan-500/10 text-cyan-300">USD</span>
+                </div>
+                <div class="py-2">
+                    <p class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Nombre de usuario</p>
+                    <span class="font-mono text-lg font-bold text-white tracking-wider">GERARVPN</span>
+                </div>
+                <button class="btn-copy" onclick="copyData('GERARVPN', 'PayPal Usuario', this)">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2"></path>
+                    </svg>
+                    <span>Copiar Usuario</span>
+                </button>
+            </div>
+
+        </div>
+
+    </main>
+
+    <footer class="w-full py-8 text-center border-t border-white/[0.02]">
+        <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
+            <span class="font-semibold text-gray-500 tracking-widest">gzmnet © 2026</span>
+            <span>Acceso rápido a coordenadas de transferencia autorizadas.</span>
+        </div>
+    </footer>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script>
+        // Función mejorada: solo copia desde el botón, no desde la tarjeta
+        function copyData(value, label, buttonElement) {
+            const tempInput = document.createElement('textarea');
+            tempInput.value = value;
+            tempInput.style.position = 'fixed';
+            tempInput.style.opacity = '0';
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showToast(`Copiado con éxito`, `${label} copiado.`);
+                    
+                    // Feedback visual en el botón
+                    if (buttonElement) {
+                        const originalContent = buttonElement.innerHTML;
+                        buttonElement.classList.add('copied');
+                        buttonElement.innerHTML = `
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <span>¡Copiado!</span>
+                        `;
+                        setTimeout(() => {
+                            buttonElement.classList.remove('copied');
+                            buttonElement.innerHTML = originalContent;
+                        }, 2000);
+                    }
+                } else {
+                    showToast("Error", "No se pudo copiar automáticamente.", "error");
+                }
+            } catch (err) {
+                showToast("Acción no soportada", "Por favor copia el texto manualmente.", "error");
+            }
+            
+            document.body.removeChild(tempInput);
+        }
+
+        // Toast (sin cambios)
+        function showToast(title, message, status = "success") {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${status}`;
+            
+            let iconMarkup = `
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+                </svg>
+            `;
+            if (status === 'error') {
+                iconMarkup = `
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                `;
+            }
+
+            toast.innerHTML = `
+                <div class="toast-icon">${iconMarkup}</div>
+                <div class="toast-body">
+                    <div class="toast-title">${title}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+                <button class="toast-close" onclick="this.closest('.toast').remove()"><i data-lucide="x" class="w-4 h-4"></i></button>
+            `;
+
+            container.appendChild(toast);
+            lucide.createIcons();
+            requestAnimationFrame(() => toast.classList.add('show'));
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+        });
+    </script>
+
+</body>
+</html>
