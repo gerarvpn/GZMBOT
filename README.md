@@ -1,4 +1,4 @@
 
 <p align="center">
-  <img src="https://drive.google.com/file/d/1_4VAmfAujbobW8HbmPGIPlWXIfzC4KQR/view?usp=drivesdk" alt="Logo" width="140">
+  <img src="https://postimg.cc/06XkJT9K" width="140">
 </p>
