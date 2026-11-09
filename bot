@@ -1,0 +1,1023 @@
+cat > /tmp/install.sh << 'ENDSCRIPT'
+#!/bin/bash
+set -o pipefail
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
+V='\033[0;32m'; R='\033[0;31m'; A='\033[1;33m'; B='\033[0;34m'; N='\033[0m'
+ok()   { echo -e "${V}✓${N} $*"; }
+err()  { echo -e "${R}✗${N} $*"; }
+info() { echo -e "${B}▶${N} $*"; }
+warn() { echo -e "${A}⚠${N} $*"; }
+
+INSTALL_DIR="/opt/bot-installer"
+INSTALLERS_DIR="$INSTALL_DIR/installers"
+SERVICE="bot-installer"
+
+clear
+echo -e "${B}════════════════════════════════════════════════${N}"
+echo -e "${B}   BOT TELEGRAM INSTALLER — v6                    ${N}"
+echo -e "${B}════════════════════════════════════════════════${N}"
+
+# ── 1. LIMPIEZA ────────────────────────────────────────────────
+warn "Borrando instalación anterior..."
+OLD_PORT=""
+[ -f "$INSTALL_DIR/config.env" ] && OLD_PORT=$(grep '^PORT=' "$INSTALL_DIR/config.env" 2>/dev/null | cut -d= -f2)
+
+systemctl stop "$SERVICE" 2>/dev/null
+systemctl disable "$SERVICE" 2>/dev/null
+rm -f /etc/cron.d/bot-installer-cleanup 2>/dev/null
+[ -n "$OLD_PORT" ] && command -v ufw >/dev/null 2>&1 && ufw delete allow "$OLD_PORT/tcp" >/dev/null 2>&1
+rm -f /etc/systemd/system/${SERVICE}.service
+rm -rf /etc/systemd/system/${SERVICE}.service.d
+rm -f /etc/nginx/sites-enabled/bot-installer
+rm -f /etc/nginx/sites-available/bot-installer
+rm -f /usr/local/bin/bot
+rm -rf "$INSTALL_DIR"
+systemctl daemon-reload
+ok "Limpieza completa"
+
+# ── 2. Dependencias ────────────────────────────────────────────
+info "[1/9] Instalando dependencias..."
+apt-get update -y >/dev/null 2>&1 || { err "apt update falló"; exit 1; }
+apt-get install -y -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
+    python3 python3-pip python3-venv nginx curl ca-certificates tmux cron >/dev/null 2>&1
+[ $? -ne 0 ] && { err "Fallo instalando paquetes"; exit 1; }
+
+systemctl enable nginx >/dev/null 2>&1
+systemctl is-active --quiet nginx || systemctl start nginx
+sleep 2
+systemctl is-active --quiet nginx || { err "Nginx no arrancó"; exit 1; }
+systemctl enable cron >/dev/null 2>&1
+systemctl is-active --quiet cron || systemctl start cron
+ok "Dependencias OK"
+
+# ── 3. Datos ───────────────────────────────────────────────────
+echo ""
+read -rp "Token del bot (@BotFather): " BOT_TOKEN
+read -rp "URL raw de GitHub: " GITHUB_URL
+read -rp "Dominio raíz (ej: gzmnet.com): " DOMINIO_RAIZ
+read -rp "Puerto [8080]: " PUERTO_IN
+echo ""
+echo "── Administrador del bot ──"
+echo "Abre @userinfobot en Telegram y envíale /start para ver tu ID."
+read -rp "Tu ID de Telegram (admin): " ADMIN_ID
+
+FULL_DOMAIN=$(echo "$DOMINIO_RAIZ" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]' | sed 's|^http://||;s|^https://||;s|/$||;s|:.*||')
+PORT="${PUERTO_IN:-8080}"
+BOT_TOKEN=$(echo "$BOT_TOKEN" | tr -d '[:space:]')
+ADMIN_ID=$(echo "$ADMIN_ID" | tr -d '[:space:]')
+
+echo "$GITHUB_URL" | grep -q "/blob/" && GITHUB_URL=$(echo "$GITHUB_URL" | sed 's|github.com|raw.githubusercontent.com|;s|/blob/|/|')
+
+# ── 4. Validaciones ────────────────────────────────────────────
+info "Validando..."
+[ -z "$BOT_TOKEN" ] || [ -z "$GITHUB_URL" ] || [ -z "$FULL_DOMAIN" ] || [ -z "$ADMIN_ID" ] && { err "Faltan datos"; exit 1; }
+[[ "$ADMIN_ID" =~ ^[0-9]+$ ]] || { err "ADMIN_ID inválido"; exit 1; }
+
+TG=$(curl -s -o /dev/null -w "%{http_code}" "https://api.telegram.org/bot${BOT_TOKEN}/getMe" 2>/dev/null)
+[ "$TG" != "200" ] && { err "Token bot inválido"; exit 1; }
+GH=$(curl -s -o /dev/null -w "%{http_code}" -L "$GITHUB_URL" 2>/dev/null)
+[ "$GH" != "200" ] && { err "GitHub HTTP $GH"; exit 1; }
+ok "Todo válido"
+
+echo ""
+echo -e "${A}════════ RESUMEN ════════${N}"
+echo "  Bot:    ${BOT_TOKEN:0:10}...${BOT_TOKEN: -4}"
+echo "  Admin:  $ADMIN_ID"
+echo "  URL:    http://$FULL_DOMAIN:$PORT/"
+echo "  TTL:    1 hora"
+echo -e "${A}═════════════════════════${N}"
+read -rp "¿Continuar? (s/n): " CONF
+[ "$CONF" != "s" ] && [ "$CONF" != "S" ] && { echo "Cancelado"; exit 0; }
+
+# ── 5. Directorios + Python ────────────────────────────────────
+mkdir -p "$INSTALL_DIR" "$INSTALLERS_DIR"
+chmod 755 "$INSTALL_DIR" "$INSTALLERS_DIR"
+
+info "[2/9] Configurando Python..."
+cd "$INSTALL_DIR" || exit 1
+python3 -m venv venv || exit 1
+source venv/bin/activate
+pip install --quiet --upgrade pip >/dev/null 2>&1
+pip install --quiet "python-telegram-bot>=21.1,<22" "httpx>=0.25" >/dev/null 2>&1 || { err "pip falló"; exit 1; }
+ok "Python OK"
+
+# ── 6. Config + State ──────────────────────────────────────────
+info "[3/9] Guardando configuración..."
+cat > "$INSTALL_DIR/config.env" << CFGEOF
+BOT_TOKEN=$BOT_TOKEN
+FULL_DOMAIN=$FULL_DOMAIN
+PORT=$PORT
+INSTALLERS_DIR=$INSTALLERS_DIR
+TOKEN_TTL=3600
+CFGEOF
+chmod 600 "$INSTALL_DIR/config.env"
+
+python3 -c "
+import json
+json.dump({
+    'github_url': '''$GITHUB_URL'''.strip(),
+    'admins': [$ADMIN_ID],
+    'group_id': '',
+    'group_name': '',
+    'group_invite_url': '',
+    'group_linked': False
+}, open('$INSTALL_DIR/state.json','w'), indent=2)
+"
+chmod 644 "$INSTALL_DIR/state.json"
+ok "Config OK"
+
+# ── 7. bot.py ──────────────────────────────────────────────────
+info "[4/9] Creando bot.py..."
+cat > "$INSTALL_DIR/bot.py" << 'PYEOF'
+import os, json, logging, uuid, time, datetime
+from pathlib import Path
+import httpx
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, ContextTypes,
+    ChatMemberHandler, MessageHandler, CallbackQueryHandler, filters
+)
+try:
+    from telegram import CopyTextButton
+    HAS_COPY = True
+except ImportError:
+    HAS_COPY = False
+
+CONFIG = {}
+with open('/opt/bot-installer/config.env') as f:
+    for line in f:
+        if '=' in line:
+            k, v = line.strip().split('=', 1)
+            CONFIG[k] = v
+
+TOKEN       = CONFIG['BOT_TOKEN']
+FULL_DOMAIN = CONFIG['FULL_DOMAIN']
+PORT        = CONFIG['PORT']
+INSTALLERS  = Path(CONFIG['INSTALLERS_DIR'])
+INSTALLERS.mkdir(parents=True, exist_ok=True)
+BASE_URL    = f"http://{FULL_DOMAIN}:{PORT}"
+STATE_FILE  = '/opt/bot-installer/state.json'
+TTL         = int(CONFIG.get('TOKEN_TTL', '3600'))
+
+logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=logging.INFO)
+log = logging.getLogger(__name__)
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {'github_url':'','admins':[],'group_id':'','group_name':'','group_invite_url':'','group_linked':False}
+    with open(STATE_FILE) as f:
+        return json.load(f)
+
+def save_state(s):
+    with open(STATE_FILE, 'w') as f:
+        json.dump(s, f, indent=2)
+
+def is_admin(uid):
+    return uid in load_state().get('admins', [])
+
+# ── RECUPERACIÓN DE GRUPO AL ARRANCAR ────────────────────────
+def recover_group_sync(state):
+    """Si no hay grupo vinculado pero el bot YA está en un grupo,
+       lo recupera desde getUpdates pendientes de Telegram."""
+    if state.get('group_linked'):
+        return
+    log.info("Recuperando grupo desde updates pendientes...")
+    try:
+        with httpx.Client(timeout=15) as cli:
+            # Quitar webhook para que getUpdates funcione
+            cli.get(f"https://api.telegram.org/bot{TOKEN}/deleteWebhook")
+            r = cli.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates",
+                        params={"limit": 100, "timeout": 0})
+            data = r.json()
+            if not data.get('ok'):
+                log.warning("getUpdates falló")
+                return
+
+            groups = {}
+            for upd in data.get('result', []):
+                chat = None
+                for key in ('message', 'my_chat_member', 'channel_post', 'edited_message'):
+                    if key in upd:
+                        chat = upd[key].get('chat')
+                        break
+                if chat and chat.get('type') in ('group', 'supergroup'):
+                    groups[chat['id']] = chat.get('title', 'Grupo')
+
+            if not groups:
+                log.info("No hay grupos en updates pendientes")
+                return
+
+            # Preferir el que coincida con group_name configurado
+            target = state.get('group_name', '').lower()
+            gid = gname = None
+            for g_id, g_name in groups.items():
+                if target and target in g_name.lower():
+                    gid, gname = g_id, g_name
+                    break
+            if gid is None:
+                gid, gname = list(groups.items())[0]
+
+            # Verificar que el bot sigue en el grupo
+            try:
+                r2 = cli.get(f"https://api.telegram.org/bot{TOKEN}/getChat",
+                             params={"chat_id": gid})
+                if not r2.json().get('ok'):
+                    log.warning(f"Bot no está en el grupo {gid}")
+                    return
+                chat_info = r2.json()['result']
+                gname = chat_info.get('title', gname)
+            except Exception as e:
+                log.warning(f"getChat falló: {e}")
+                return
+
+            state['group_id'] = str(gid)
+            state['group_name'] = gname
+            state['group_linked'] = True
+
+            # Intentar crear invite link
+            try:
+                r3 = cli.get(f"https://api.telegram.org/bot{TOKEN}/createChatInviteLink",
+                             params={"chat_id": gid, "name": "Bot Share"})
+                if r3.json().get('ok'):
+                    state['group_invite_url'] = r3.json()['result']['invite_link']
+            except Exception:
+                pass
+
+            save_state(state)
+            log.info(f"✓ Grupo recuperado: {gid} ({gname})")
+    except Exception as e:
+        log.error(f"recover_group error: {e}")
+
+def limpiar(code):
+    if code.startswith('\ufeff'):
+        code = code[1:]
+    code = code.replace('\r\n','\n').replace('\r','\n')
+    if not code.startswith('#!'):
+        code = '#!/bin/bash\n' + code
+    if not code.endswith('\n'):
+        code += '\n'
+    return code
+
+async def esta_en_grupo(bot, uid):
+    state = load_state()
+    gid = state.get('group_id','')
+    if not gid:
+        return None
+    try:
+        member = await bot.get_chat_member(chat_id=gid, user_id=uid)
+        return member.status in ('creator','administrator','member')
+    except Exception as e:
+        log.warning(f"get_chat_member: {e}")
+        return False
+
+def copy_btn(label, text):
+    if not HAS_COPY:
+        return None
+    try:
+        return InlineKeyboardButton(label, copy_text=CopyTextButton(text=text))
+    except Exception:
+        return None
+
+# ── Auto-vinculación ─────────────────────────────────────────
+async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cm = update.my_chat_member
+    if not cm:
+        return
+    chat = cm.chat
+    if chat.type not in ('group','supergroup'):
+        return
+
+    old = cm.old_chat_member.status if cm.old_chat_member else 'left'
+    new = cm.new_chat_member.status if cm.new_chat_member else 'left'
+
+    state = load_state()
+    linked_gid = state.get('group_id','')
+
+    if old in ('member','administrator') and new in ('left','kicked'):
+        if str(chat.id) == linked_gid:
+            state['group_id'] = ''
+            state['group_name'] = ''
+            state['group_invite_url'] = ''
+            state['group_linked'] = False
+            save_state(state)
+            log.info(f"Grupo desvinculado: {chat.id}")
+        return
+
+    if not (old in ('left','kicked') and new in ('member','administrator')):
+        return
+
+    adder = cm.from_user
+
+    if state.get('group_linked') and str(chat.id) != linked_gid:
+        gname = state.get('group_name','el grupo oficial')
+        invite = state.get('group_invite_url','')
+        text = f"⚠️ Este bot solo funciona con *{gname}*."
+        if invite:
+            text += f"\n\n👉 Únete: {invite}"
+        try:
+            await context.bot.send_message(chat_id=chat.id, text=text,
+                parse_mode="Markdown", disable_web_page_preview=True)
+        except Exception:
+            pass
+        try:
+            await context.bot.leave_chat(chat.id)
+        except Exception:
+            pass
+        return
+
+    if not adder or not is_admin(adder.id):
+        try:
+            await context.bot.send_message(
+                chat_id=chat.id,
+                text="⚠️ Solo el administrador del bot puede vincular este grupo.")
+        except Exception:
+            pass
+        try:
+            await context.bot.leave_chat(chat.id)
+        except Exception:
+            pass
+        return
+
+    invite = ""
+    try:
+        if chat.username:
+            invite = f"https://t.me/{chat.username}"
+        else:
+            link = await context.bot.create_chat_invite_link(
+                chat_id=chat.id, name="Bot Share")
+            invite = link.invite_link
+    except Exception as e:
+        log.warning(f"invite link: {e}")
+
+    state['group_id'] = str(chat.id)
+    state['group_name'] = chat.title or 'Grupo'
+    state['group_invite_url'] = invite
+    state['group_linked'] = True
+    save_state(state)
+    log.info(f"Grupo vinculado: {chat.id} ({chat.title})")
+
+    try:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=(f"✅ *Grupo vinculado correctamente*\n\n"
+                  f"Nombre: *{chat.title}*\n\n"
+                  f"Los miembros ya pueden generar instaladores con /start al bot en privado."),
+            parse_mode="Markdown")
+    except Exception:
+        pass
+
+# ── Teclados ──────────────────────────────────────────────────
+def menu_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Generar instalador", callback_data="m:gen")],
+        [InlineKeyboardButton("ℹ️ Ayuda", callback_data="m:help"),
+         InlineKeyboardButton("📊 Mi estado", callback_data="m:status")],
+        [InlineKeyboardButton("🆔 Mi ID", callback_data="m:id")]
+    ])
+
+def join_kb(invite, gname):
+    rows = []
+    if invite:
+        rows.append([InlineKeyboardButton(f"🔗 Unirse a {gname}", url=invite)])
+    rows.append([InlineKeyboardButton("✅ Ya me uní", callback_data="m:gen")])
+    rows.append([InlineKeyboardButton("🆔 Mi ID", callback_data="m:id")])
+    return InlineKeyboardMarkup(rows)
+
+# ── Generar ──────────────────────────────────────────────────
+async def do_generate(target, context, uid, is_edit=False):
+    state = load_state()
+
+    # Verificación doble (defensa en profundidad)
+    if not is_admin(uid):
+        if not state.get('group_linked'):
+            text = ("⚠️ El bot aún no está vinculado a un grupo.\n"
+                    "Contacta al administrador.")
+            if is_edit:
+                try: await target.edit_text(text)
+                except: await target.reply_text(text)
+            else:
+                await target.reply_text(text)
+            return
+
+        in_group = await esta_en_grupo(context.bot, uid)
+        if in_group is not True:
+            invite = state.get('group_invite_url','')
+            gname = state.get('group_name','el grupo')
+            text = (
+                f"🔒 *Acceso restringido*\n\n"
+                f"Para generar instaladores debes ser miembro del grupo *{gname}*.\n\n"
+                f"🆔 Tu ID: `{uid}`"
+            )
+            kb = join_kb(invite, gname)
+            if is_edit:
+                try: await target.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+                except: await target.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+            else:
+                await target.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+            return
+
+    url = state.get('github_url','')
+    if not url:
+        txt = "⚠️ No hay fuente configurada."
+        await (target.edit_text(txt) if is_edit else target.reply_text(txt))
+        return
+
+    if is_edit:
+        try: msg = await target.edit_text("⚙️ Generando instalador...")
+        except: msg = await target.reply_text("⚙️ Generando instalador...")
+    else:
+        msg = await target.reply_text("⚙️ Generando instalador...")
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=60) as cli:
+            r = await cli.get(url)
+            if r.status_code != 200:
+                await msg.edit_text("❌ Error interno.")
+                return
+            code = r.text
+        if not code.strip():
+            await msg.edit_text("❌ Recurso vacío.")
+            return
+
+        code = limpiar(code)
+        t = str(uuid.uuid4())
+        now = int(time.time())
+        expires = now + TTL
+
+        (INSTALLERS / f"{t}.sh").write_text(code)
+        (INSTALLERS / f"{t}.json").write_text(json.dumps({
+            'created_at': now, 'expires_at': expires, 'creator_id': uid
+        }))
+
+        exp_str = datetime.datetime.fromtimestamp(expires).strftime("%d/%m/%Y %H:%M")
+        cmd = f"curl -sL {BASE_URL}/install.sh | bash"
+
+        text = (
+            f"✅ *Instalador generado*\n\n"
+            f"⏱️ Válido 1 hora · expira {exp_str}\n\n"
+            f"📋 *Comando de instalación:*\n"
+            f"`{cmd}`\n\n"
+            f"🔑 *Token de acceso:*\n"
+            f"`{t}`"
+        )
+
+        rows = []
+        b1 = copy_btn("📋 Copiar comando", cmd)
+        b2 = copy_btn("🔑 Copiar token", t)
+        if b1: rows.append([b1])
+        if b2: rows.append([b2])
+        rows.append([InlineKeyboardButton("🔄 Generar otro", callback_data="m:gen")])
+        rows.append([InlineKeyboardButton("🔙 Menú", callback_data="m:menu")])
+        kb = InlineKeyboardMarkup(rows)
+
+        try:
+            await msg.edit_text(text, parse_mode="Markdown",
+                disable_web_page_preview=True, reply_markup=kb)
+        except Exception:
+            await msg.edit_text(text, disable_web_page_preview=True)
+
+    except httpx.TimeoutException:
+        await msg.edit_text("❌ Tiempo de espera agotado.")
+    except httpx.ConnectError:
+        await msg.edit_text("❌ Sin conexión.")
+    except Exception:
+        log.exception("Error generar")
+        await msg.edit_text("❌ Error interno.")
+
+# ── Menú / vistas ────────────────────────────────────────────
+async def show_menu(target, is_edit=False):
+    text = "🤖 *Panel de control*\n\nSelecciona una opción:"
+    if is_edit:
+        try: await target.edit_text(text, parse_mode="Markdown", reply_markup=menu_kb())
+        except: await target.reply_text(text, parse_mode="Markdown", reply_markup=menu_kb())
+    else:
+        await target.reply_text(text, parse_mode="Markdown", reply_markup=menu_kb())
+
+async def show_help(target, is_edit=False):
+    text = (
+        "📖 *Ayuda*\n\n"
+        "🚀 *Generar instalador* — Crea uno nuevo válido 1h\n"
+        "📊 *Mi estado* — Tu información y membresía\n"
+        "🆔 *Mi ID* — Tu ID numérico de Telegram\n\n"
+        "*Comandos:*\n"
+        "/start — Panel principal\n"
+        "/nuevo — Generar instalador\n"
+        "/miid — Tu ID\n"
+        "/help — Ayuda"
+    )
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menú", callback_data="m:menu")]])
+    if is_edit:
+        try: await target.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        except: await target.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await target.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+
+async def show_status(target, context, uid, is_edit=False):
+    state = load_state()
+    admin = is_admin(uid)
+    in_group = await esta_en_grupo(context.bot, uid) if state.get('group_linked') else None
+
+    text = (
+        f"📊 *Tu estado*\n\n"
+        f"🆔 ID: `{uid}`\n"
+        f"👑 Admin: {'✅ sí' if admin else '❌ no'}\n"
+    )
+    if state.get('group_linked'):
+        gname = state.get('group_name','?')
+        if in_group is True:
+            text += f"👥 Grupo *{gname}*: ✅ miembro\n"
+        elif in_group is False:
+            text += f"👥 Grupo *{gname}*: ❌ no eres miembro\n"
+        else:
+            text += f"👥 Grupo *{gname}*: ⚠️ no verificado\n"
+    else:
+        text += "👥 Grupo: ⚠️ no configurado\n"
+
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menú", callback_data="m:menu")]])
+    if is_edit:
+        try: await target.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        except: await target.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await target.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+
+# ── Callback ─────────────────────────────────────────────────
+async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try:
+        await q.answer()
+    except Exception:
+        pass
+    data = q.data
+    uid = update.effective_user.id
+
+    if data == "m:menu":
+        await show_menu(q.message, is_edit=True)
+    elif data == "m:gen":
+        await do_generate(q.message, context, uid, is_edit=True)
+    elif data == "m:help":
+        await show_help(q.message, is_edit=True)
+    elif data == "m:status":
+        await show_status(q.message, context, uid, is_edit=True)
+    elif data == "m:id":
+        try:
+            await q.message.edit_text(
+                f"🆔 Tu ID: `{uid}`", parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Volver", callback_data="m:menu")
+                ]]))
+        except Exception:
+            pass
+
+# ── Comandos ─────────────────────────────────────────────────
+async def cmd_start(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    # En grupo → redirigir a privado
+    if u.effective_chat.type in ('group','supergroup'):
+        me = await c.bot.get_me()
+        await u.message.reply_text(
+            f"👋 Para generar instaladores escríbeme en privado: @{me.username}")
+        return
+
+    uid = u.effective_user.id
+    state = load_state()
+
+    # Admin → menú
+    if is_admin(uid):
+        await show_menu(u.message)
+        return
+
+    # No admin → verificar grupo ANTES de mostrar nada
+    if not state.get('group_linked'):
+        await u.message.reply_text(
+            "⚠️ *El bot aún no está vinculado a un grupo.*\n\n"
+            "Pide al administrador que añada el bot al grupo oficial.",
+            parse_mode="Markdown")
+        return
+
+    in_group = await esta_en_grupo(c.bot, uid)
+    if in_group is not True:
+        invite = state.get('group_invite_url','')
+        gname = state.get('group_name','el grupo')
+        await u.message.reply_text(
+            f"🔒 *Acceso restringido*\n\n"
+            f"Para generar instaladores debes ser miembro del grupo *{gname}*.\n\n"
+            f"🆔 Tu ID: `{uid}`\n\n"
+            f"Únete al grupo y pulsa *Ya me uní*.",
+            parse_mode="Markdown",
+            reply_markup=join_kb(invite, gname))
+        return
+
+    await show_menu(u.message)
+
+async def cmd_help(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    await show_help(u.message)
+
+async def cmd_miid(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    await u.message.reply_text(f"🆔 Tu ID: `{u.effective_user.id}`", parse_mode="Markdown")
+
+async def cmd_nuevo(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    await do_generate(u.message, c, u.effective_user.id)
+
+async def cmd_setgithub(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(u.effective_user.id):
+        await u.message.reply_text("⛔ Solo administradores."); return
+    if not c.args:
+        await u.message.reply_text("Uso: `/setgithub <url>`", parse_mode="Markdown"); return
+    url = c.args[0]
+    if 'github.com' in url and '/blob/' in url:
+        url = url.replace('github.com','raw.githubusercontent.com').replace('/blob/','/')
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as cli:
+            r = await cli.get(url)
+            if r.status_code != 200:
+                await u.message.reply_text(f"❌ HTTP {r.status_code}"); return
+    except Exception:
+        await u.message.reply_text("❌ URL inválida."); return
+    s = load_state(); s['github_url'] = url; save_state(s)
+    await u.message.reply_text("✅ Fuente actualizada.")
+
+async def cmd_addadmin(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(u.effective_user.id):
+        await u.message.reply_text("⛔ Solo administradores."); return
+    if not c.args:
+        await u.message.reply_text("Uso: `/addadmin <id>`", parse_mode="Markdown"); return
+    try:
+        uid = int(c.args[0])
+    except ValueError:
+        await u.message.reply_text("❌ ID inválido."); return
+    s = load_state()
+    if uid in s['admins']:
+        await u.message.reply_text("ℹ️ Ya es admin."); return
+    s['admins'].append(uid); save_state(s)
+    await u.message.reply_text(f"✅ Admin añadido: `{uid}`", parse_mode="Markdown")
+
+async def cmd_rmadmin(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(u.effective_user.id):
+        await u.message.reply_text("⛔ Solo administradores."); return
+    if not c.args:
+        await u.message.reply_text("Uso: `/rmadmin <id>`", parse_mode="Markdown"); return
+    try:
+        uid = int(c.args[0])
+    except ValueError:
+        await u.message.reply_text("❌ ID inválido."); return
+    s = load_state()
+    if uid not in s['admins']:
+        await u.message.reply_text("ℹ️ No es admin."); return
+    if len(s['admins']) == 1:
+        await u.message.reply_text("⚠️ No puedes quitar al último admin."); return
+    s['admins'].remove(uid); save_state(s)
+    await u.message.reply_text(f"🗑️ Admin eliminado: `{uid}`", parse_mode="Markdown")
+
+async def cmd_admins(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(u.effective_user.id):
+        await u.message.reply_text("⛔ Solo administradores."); return
+    s = load_state()
+    await u.message.reply_text(
+        "👥 *Admins:*\n" + "\n".join(f"• `{a}`" for a in s['admins']),
+        parse_mode="Markdown")
+
+async def cmd_config(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(u.effective_user.id):
+        await u.message.reply_text("⛔ Solo administradores."); return
+    s = load_state()
+    vinculado = "✅ Sí" if s.get('group_linked') else "❌ No"
+    txt = (
+        "⚙️ *Configuración*\n\n"
+        f"🌐 Dominio: `{FULL_DOMAIN}`\n"
+        f"🔌 Puerto: `{PORT}`\n"
+        f"⏱️ TTL: `{TTL//60} min`\n"
+        f"👥 Grupo: *{s.get('group_name','—')}*\n"
+        f"🔗 Vinculado: {vinculado}\n"
+        f"👑 Admins: `{len(s.get('admins',[]))}`\n"
+        f"📁 Instaladores: `{len(list(INSTALLERS.glob('*.sh'))) - 1}`"
+    )
+    await u.message.reply_text(txt, parse_mode="Markdown")
+
+# ── Bloqueo global ───────────────────────────────────────────
+async def on_message(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    uid = u.effective_user.id
+    if is_admin(uid):
+        return
+    state = load_state()
+    if not state.get('group_linked'):
+        return
+    if await esta_en_grupo(c.bot, uid) is True:
+        return
+    invite = state.get('group_invite_url','')
+    gname = state.get('group_name','el grupo')
+    await u.message.reply_text(
+        f"🔒 Debes ser miembro del grupo *{gname}* para usar este bot.",
+        parse_mode="Markdown",
+        reply_markup=join_kb(invite, gname))
+
+def main():
+    log.info(f"Bot iniciado | {FULL_DOMAIN}:{PORT}")
+    # ── Recuperar grupo si el bot ya estaba en uno ──
+    state = load_state()
+    recover_group_sync(state)
+
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("nuevo", cmd_nuevo))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("miid", cmd_miid))
+    app.add_handler(CommandHandler("setgithub", cmd_setgithub))
+    app.add_handler(CommandHandler("addadmin", cmd_addadmin))
+    app.add_handler(CommandHandler("rmadmin", cmd_rmadmin))
+    app.add_handler(CommandHandler("admins", cmd_admins))
+    app.add_handler(CommandHandler("config", cmd_config))
+    app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(CallbackQueryHandler(on_callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
+    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
+PYEOF
+ok "bot.py creado"
+
+# ── 8. Instalador genérico (con /dev/tty) ─────────────────────
+info "[5/9] Creando instalador genérico..."
+cat > "$INSTALLERS_DIR/install.sh" << 'INSTEOF'
+#!/bin/bash
+DOMINIO="__DOMINIO__"
+PUERTO="__PUERTO__"
+
+echo ""
+echo "════════════════════════════════════════"
+echo "  INSTALADOR — $DOMINIO"
+echo "════════════════════════════════════════"
+echo ""
+
+if [ -z "${TOKEN:-}" ]; then
+    if [ -e /dev/tty ]; then
+        read -rp "🔑 Token: " TOKEN < /dev/tty
+    else
+        read -rp "🔑 Token: " TOKEN
+    fi
+fi
+
+if [ -z "$TOKEN" ]; then
+    echo "❌ Token requerido"
+    exit 1
+fi
+
+URL="http://${DOMINIO}:${PUERTO}/${TOKEN}.sh"
+HTTP=$(curl -sL -o /dev/null -w "%{http_code}" "$URL" 2>/dev/null)
+
+if [ "$HTTP" != "200" ]; then
+    echo "❌ Token inválido o expirado (válido 1 hora)"
+    exit 1
+fi
+
+echo "✓ Token válido. Iniciando instalación..."
+sleep 1
+curl -sL "$URL" | bash
+INSTEOF
+# Sustituir valores
+sed -i "s|__DOMINIO__|$FULL_DOMAIN|g; s|__PUERTO__|$PORT|g" "$INSTALLERS_DIR/install.sh"
+chmod 644 "$INSTALLERS_DIR/install.sh"
+ok "Instalador creado"
+
+# ── 9. Cleanup cron ────────────────────────────────────────────
+info "[6/9] Configurando cleanup..."
+cat > "$INSTALL_DIR/cleanup.py" << 'CLEANEOF'
+#!/usr/bin/env python3
+import json, time
+from pathlib import Path
+INSTALLERS = Path('/opt/bot-installer/installers')
+now = int(time.time())
+for meta in INSTALLERS.glob('*.json'):
+    try:
+        data = json.loads(meta.read_text())
+        if data.get('expires_at', 0) < now:
+            t = meta.stem
+            for ext in ('.sh', '.json'):
+                p = INSTALLERS / f"{t}{ext}"
+                if p.exists(): p.unlink()
+    except Exception:
+        pass
+CLEANEOF
+chmod +x "$INSTALL_DIR/cleanup.py"
+echo "* * * * * root /opt/bot-installer/venv/bin/python /opt/bot-installer/cleanup.py" \
+    > /etc/cron.d/bot-installer-cleanup
+chmod 644 /etc/cron.d/bot-installer-cleanup
+
+# ── 10. systemd ────────────────────────────────────────────────
+info "[7/9] Configurando systemd..."
+cat > /etc/systemd/system/${SERVICE}.service << SVCEOF
+[Unit]
+Description=Bot Telegram Installer
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+systemctl daemon-reload
+systemctl enable "$SERVICE" >/dev/null 2>&1
+systemctl restart "$SERVICE"
+sleep 5
+if systemctl is-active --quiet "$SERVICE"; then
+    ok "Servicio activo"
+else
+    err "Servicio no arrancó:"
+    journalctl -u "$SERVICE" -n 30 --no-pager
+    exit 1
+fi
+
+# ── 11. Nginx ──────────────────────────────────────────────────
+info "[8/9] Configurando Nginx..."
+cat > /etc/nginx/sites-available/bot-installer << NGXEOF
+server {
+    listen $PORT;
+    listen [::]:$PORT;
+    server_name _;
+    root $INSTALLERS_DIR;
+    autoindex off;
+    location / { try_files \$uri =404; }
+    location = /install.sh {
+        default_type text/plain;
+        charset utf-8;
+    }
+    location ~ \.sh$ {
+        default_type text/plain;
+        charset utf-8;
+        add_header Content-Type "text/plain; charset=utf-8";
+    }
+    location ~ \.json$ {
+        deny all;
+        return 404;
+    }
+}
+NGXEOF
+ln -sf /etc/nginx/sites-available/bot-installer /etc/nginx/sites-enabled/bot-installer
+nginx -t >/dev/null 2>&1 || { err "Nginx inválido"; nginx -t; exit 1; }
+systemctl is-active --quiet nginx || systemctl start nginx
+sleep 2
+systemctl reload nginx || systemctl restart nginx
+ok "Nginx OK"
+
+# ── 12. Panel 'bot' ────────────────────────────────────────────
+info "[9/9] Creando panel 'bot'..."
+cat > /usr/local/bin/bot << 'BOTSH'
+#!/bin/bash
+S="bot-installer"
+STATE="/opt/bot-installer/state.json"
+CFG="/opt/bot-installer/config.env"
+while true; do
+    printf "\n\033[0;34m════════ PANEL ADMIN ════════\033[0m\n"
+    ST=$(systemctl is-active "$S" 2>/dev/null || echo "inactivo")
+    GRP=$(python3 -c "import json;d=json.load(open('$STATE'));g=d.get('group_name','—');l='vinculado' if d.get('group_linked') else 'sin vincular';print(f'{g} ({l})')" 2>/dev/null || echo "?")
+    printf " Estado: %s\n Grupo:  %s\n" "$ST" "$GRP"
+    printf "\033[0;34m══════════════════════════════\033[0m\n"
+    printf "  1) Estado servicio       10) Ver grupo\n"
+    printf "  2) Logs últimos 30       11) Desvincular grupo\n"
+    printf "  3) Logs en vivo          12) Cambiar GitHub URL\n"
+    printf "  4) Reiniciar bot         13) Probar descarga GitHub\n"
+    printf "  5) Listar instaladores   14) Probar servidor web\n"
+    printf "  6) Borrar instalador     15) Ver configuración\n"
+    printf "  7) Listar admins         16) Recuperar grupo (getUpdates)\n"
+    printf "  8) Añadir admin\n"
+    printf "  9) Quitar admin\n"
+    printf "  0) Salir\n"
+    printf "\033[0;34m══════════════════════════════\033[0m\n"
+    printf "Opción: "
+    if ! read -r o; then exit 0; fi
+    case "$o" in
+        1) systemctl status "$S" --no-pager -l 2>&1 | head -25 ;;
+        2) journalctl -u "$S" -n 30 --no-pager 2>&1 ;;
+        3) journalctl -u "$S" -f ;;
+        4) systemctl restart "$S"; sleep 2
+           systemctl is-active --quiet "$S" && echo "✓ Reiniciado" || echo "✗ Falló" ;;
+        5) ls -1 /opt/bot-installer/installers/*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | grep -v install.sh || echo "(vacío)" ;;
+        6) printf "Token: "; read -r t
+           rm -f "/opt/bot-installer/installers/${t}.sh" \
+                 "/opt/bot-installer/installers/${t}.json" \
+               && echo "✓ Borrado" || echo "✗ No existe" ;;
+        7) python3 -c "import json;print('\n'.join(map(str,json.load(open('$STATE')).get('admins',[]))))" 2>/dev/null || echo "(ninguno)" ;;
+        8) printf "ID: "; read -r nid
+           if [[ ! "$nid" =~ ^[0-9]+$ ]]; then echo "✗ ID inválido"
+           else python3 -c "
+import json
+s = json.load(open('$STATE'))
+if $nid not in s['admins']:
+    s['admins'].append($nid)
+    json.dump(s, open('$STATE','w'), indent=2)
+    print('✓ Añadido')
+else:
+    print('ℹ️ Ya existe')
+"; fi ;;
+        9) printf "ID: "; read -r rid
+           python3 -c "
+import json
+s = json.load(open('$STATE'))
+if $rid in s['admins'] and len(s['admins']) > 1:
+    s['admins'].remove($rid)
+    json.dump(s, open('$STATE','w'), indent=2)
+    print('✓ Quitado')
+elif len(s['admins']) <= 1:
+    print('⚠️ No puedes quitar al último admin')
+else:
+    print('ℹ️ No existe')
+" 2>/dev/null ;;
+        10) python3 -c "
+import json
+d = json.load(open('$STATE'))
+print('Nombre:  ', d.get('group_name','—'))
+print('ID:      ', d.get('group_id','—'))
+print('Invite:  ', d.get('group_invite_url','—'))
+print('Estado:  ', 'vinculado' if d.get('group_linked') else 'sin vincular')
+" 2>/dev/null ;;
+        11) python3 -c "
+import json
+s = json.load(open('$STATE'))
+s['group_id'] = ''
+s['group_name'] = ''
+s['group_invite_url'] = ''
+s['group_linked'] = False
+json.dump(s, open('$STATE','w'), indent=2)
+print('✓ Grupo desvinculado')
+" ;;
+        12) printf "Nueva URL GitHub: "; read -r nurl
+            if [[ "$nurl" == *"/blob/"* ]]; then
+                nurl=$(echo "$nurl" | sed 's|github.com|raw.githubusercontent.com|;s|/blob/|/|')
+                echo "Normalizada: $nurl"
+            fi
+            python3 -c "
+import json
+s = json.load(open('$STATE'))
+s['github_url'] = '''$nurl'''.strip()
+json.dump(s, open('$STATE','w'), indent=2)
+print('✓ Actualizada')
+" ;;
+        13) python3 -c "import json;print('URL:',json.load(open('$STATE')).get('github_url'))"
+            curl -sI -L "$(python3 -c "import json;print(json.load(open('$STATE')).get('github_url',''))")" 2>&1 | head -3 ;;
+        14) source "$CFG"
+            echo "Probando http://127.0.0.1:$PORT/install.sh"
+            curl -sI "http://127.0.0.1:$PORT/install.sh" 2>&1 | head -3 ;;
+        15) source "$CFG"
+            echo "Dominio:  $FULL_DOMAIN"
+            echo "Puerto:   $PORT"
+            echo "TTL:      ${TOKEN_TTL}s"
+            python3 -c "
+import json
+d = json.load(open('$STATE'))
+print('Grupo:   ', d.get('group_name','—'))
+print('Vinculado:', 'Sí' if d.get('group_linked') else 'No')
+print('Admins:  ', len(d.get('admins',[])))
+" 2>/dev/null ;;
+        16) systemctl restart "$S"
+            sleep 3
+            echo "✓ Reiniciado. El bot intentará recuperar el grupo al arrancar."
+            echo "  Ver logs: journalctl -u $S -n 20 --no-pager" ;;
+        0|"") exit 0 ;;
+        *) echo "Opción inválida" ;;
+    esac
+    printf "\n(Enter para continuar)"
+    if ! read -r _; then exit 0; fi
+done
+BOTSH
+chmod +x /usr/local/bin/bot
+
+# ── 13. Firewall + smoke test ──────────────────────────────────
+command -v ufw >/dev/null 2>&1 && ufw allow "$PORT/tcp" >/dev/null 2>&1
+
+curl -sf "http://127.0.0.1:$PORT/install.sh" >/dev/null 2>&1 && ok "Web funciona" || warn "Nginx no responde"
+
+# ── 14. Resumen ────────────────────────────────────────────────
+IP=$(curl -s https://api.ipify.org 2>/dev/null || echo "IP_DESCONOCIDA")
+echo ""
+echo -e "${V}════════════════════════════════════════════════${N}"
+echo -e "${V}   ✅ INSTALACIÓN COMPLETADA${N}"
+echo -e "${V}════════════════════════════════════════════════${N}"
+echo ""
+echo -e "${A}📌 PASOS PENDIENTES:${N}"
+echo "  1. DNS: $FULL_DOMAIN → A → $IP"
+echo "  2. Firewall VPS: abrir $PORT/tcp"
+echo "  3. Si es primera instalación: añade el bot al grupo con TU cuenta admin"
+echo "     Si estás reinstalando: el bot recuperará el grupo automáticamente"
+echo ""
+echo -e "${A}🧪 PRUEBA:${N}"
+echo "  curl -sL http://$FULL_DOMAIN:$PORT/install.sh | bash"
+echo "  (te pedirá el token)"
+echo ""
+echo -e "${A}🔧 PANEL:${N}"
+echo "  bot   → administración completa"
+echo ""
+echo -e "${V}════════════════════════════════════════════════${N}"
+ENDSCRIPT
+
+chmod +x /tmp/install.sh
+sudo bash /tmp/install.sh
